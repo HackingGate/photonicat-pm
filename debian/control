@@ -1,0 +1,19 @@
+Source: photonicat-pm
+Maintainer: HackingGate <i@hackinggate.com>
+Section: misc
+Priority: optional
+Standards-Version: 4.7.2
+Build-Depends: debhelper-compat (= 13),
+               dh-sequence-dkms,
+
+Package: photonicat-pm-dkms
+Architecture: all
+Section: misc
+Priority: optional
+Depends: ${misc:Depends},
+Description: dkms sources for photonicat-pm power manager driver
+ This package provides the dkms source code for the photonicat-pm
+ power manager driver. It handles battery status, charger monitoring,
+ RTC, hardware monitoring, thermal fan control, motion detection,
+ status LED/beeper control, network status LED, PMU version reporting,
+ power-on event tracking, and power/reboot management.

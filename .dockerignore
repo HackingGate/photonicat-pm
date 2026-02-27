@@ -1,0 +1,38 @@
+.git
+.devcontainer
+.github
+.debhelper
+
+# Debian build outputs
+*.deb
+*.changes
+*.buildinfo
+*.dsc
+*.tar.*
+
+# Debhelper scratch
+/debian/.debhelper/
+/debian/debhelper-build-stamp
+/debian/files
+/debian/*.debhelper.log
+/debian/*.debhelper
+/debian/*.substvars
+/debian/*.*.debhelper
+/debian/tmp/
+/debian/photonicat-pm-dkms/
+
+# Kernel build outputs
+**/*.o
+**/*.ko
+**/*.mod
+**/*.mod.c
+**/*.symvers
+**/*.order
+**/*.cmd
+
+# Editor/OS
+*~
+.DS_Store
+
+# Build output
+build/

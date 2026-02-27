@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+#DEBHELPER#
+
+case "$1" in
+    configure)
+        # Reload the module if it was previously loaded, so dpkg -i
+        # applies the update without requiring a reboot.
+        if lsmod | grep -q '^photonicat_pm '; then
+            rmmod photonicat_pm 2>/dev/null || true
+            modprobe photonicat_pm 2>/dev/null || true
+        fi
+    ;;
+esac
+
+exit 0

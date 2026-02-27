@@ -1,0 +1,33 @@
+services:
+  deb:
+    build: .
+    image: photonicat-pm-deb:trixie
+    volumes:
+      - .:/work/src
+      - ./build:/build
+    command: [ "bash", "-lc", "dpkg-buildpackage -us -uc -b && cp /work/*.deb /work/*.changes /work/*.buildinfo /build/" ]
+
+  verify-dkms:
+    image: photonicat-pm-deb:trixie
+    depends_on:
+      deb:
+        condition: service_completed_successfully
+    volumes:
+      - ./build:/build
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        apt-get update && apt-get install -y --no-install-recommends dkms
+        dpkg -i /build/photonicat-pm-dkms_*.deb
+        dkms status
+
+  lint:
+    image: photonicat-pm-deb:trixie
+    depends_on:
+      verify-dkms:
+        condition: service_completed_successfully
+    volumes:
+      - ./build:/build
+    command: [ "bash", "-lc", "lintian --allow-root --fail-on error,warning -- /build/*.changes" ]

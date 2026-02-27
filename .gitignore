@@ -1,0 +1,31 @@
+# Debian build artifacts
+debian/.debhelper/
+debian/photonicat-pm-dkms/
+debian/debhelper-build-stamp
+debian/files
+debian/*.debhelper.log
+debian/*.substvars
+debian/*.postinst.debhelper
+debian/*.prerm.debhelper
+debian/*.dkms.debhelper
+debian/*.install
+
+# Build output directory
+build/
+
+# Kernel module build artifacts
+*.o
+*.o.cmd
+*.ko
+*.ko.cmd
+*.mod
+*.mod.c
+*.mod.o
+*.mod.o.cmd
+.*.cmd
+.module-common.o
+..module-common.o.cmd
+modules.order
+.modules.order.cmd
+Module.symvers
+.Module.symvers.cmd

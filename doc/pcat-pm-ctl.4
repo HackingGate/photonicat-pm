@@ -1,0 +1,245 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.\" Man page for photonicat-pm kernel driver
+.TH PCAT-PM-CTL 4 "February 2026" "Linux" "Linux Programmer's Manual"
+.SH NAME
+pcat-pm-ctl \- Photonicat power manager control device
+.SH SYNOPSIS
+.B /dev/pcat-pm-ctl
+.SH DESCRIPTION
+The
+.B pcat-pm-ctl
+device provides a raw interface to communicate with the Photonicat 2
+power management unit (PMU) over the serial protocol.
+.PP
+Most PMU features are accessible through dedicated sysfs attributes
+or kernel interfaces (see below). This device serves as an escape
+hatch for advanced use cases such as multi-entry scheduled boot.
+.PP
+Userspace writes a complete protocol frame; the kernel assigns a
+frame number, recomputes the CRC, and forwards allowed commands to
+the PMU. Responses can be read back (supports
+.BR poll (2)).
+See
+.I photonicat-pm.h
+for the protocol frame format and command definitions.
+.SS Power Supply
+.TP
+.B /sys/class/power_supply/battery/
+Battery status, capacity (0\-100%), voltage, and current (read-only).
+.TP
+.B /sys/class/power_supply/charger/
+Charger online status and input voltage (read-only).
+.SS Real-Time Clock & Scheduled Boot
+.TP
+.B /dev/rtc0
+Real-time clock backed by PMU. Supports RTC alarms for scheduled
+power-on. When an alarm is set, the driver sends the alarm time to
+the PMU via UART (SCHEDULE_STARTUP_TIME_SET). The PMU stores this
+and will power on the board at the specified time, even when fully
+powered off. The alarm is one-shot (non-recurring). Standard Linux
+RTC tools such as
+.BR rtcwake (8)
+work through this interface.
+.SS Sensors & Fan
+.TP
+.B /sys/class/thermal/thermal_zone*/
+Motherboard temperature as a kernel thermal zone. Only present when
+.B #thermal-sensor-cells = <0>
+is set in the
+.B pcat-pm
+device tree node and a
+.B thermal-zones
+binding references it. When present, the kernel thermal governor can
+automatically drive the fan cooling device based on board temperature.
+.TP
+.B /sys/class/thermal/cooling_device*/
+Fan control via thermal cooling device interface.
+Values 0\-100 set fan speed percentage.
+.TP
+.B /sys/kernel/photonicat-pm/fan_state
+Fan management state (read-only). Returns
+.B unmanaged
+if the driver has not sent a SET command since loading (the PMU could be at
+unmanaged fan speed or at a previously-set managed fan speed from before a reboot), or the
+managed fan speed percentage (0\-100) once set by the driver.
+.SS LEDs & Peripherals
+.TP
+.B /sys/kernel/photonicat-pm/status_led
+Status LED control (read-write). Write 1 to enable, 0 to disable.
+.TP
+.B /sys/kernel/photonicat-pm/beeper
+Beeper control (read-write). Write 1 to enable, 0 to disable.
+.TP
+.B /sys/kernel/photonicat-pm/net_status_led_on_time
+Network status LED on time in milliseconds (read-write, 0\-65535).
+.TP
+.B /sys/kernel/photonicat-pm/net_status_led_off_time
+Network status LED off time in milliseconds (read-write, 0\-65535).
+.TP
+.B /sys/kernel/photonicat-pm/net_status_led_repeat
+Network status LED repeat count (read-write, 0\-65535). 0 = infinite.
+.TP
+.B /sys/kernel/photonicat-pm/movement_trigger
+Accelerometer-based motion detection (read-only). Returns 1 if motion
+detected, 0 otherwise.
+.SS PMU Information
+.TP
+.B /sys/kernel/photonicat-pm/pmu_hw_version
+PMU hardware version string (read-only). Queried from PMU on driver load.
+.TP
+.B /sys/kernel/photonicat-pm/pmu_fw_version
+PMU firmware version string (read-only). Queried from PMU on driver load.
+.TP
+.B /sys/kernel/photonicat-pm/power_on_event
+Last power-on event code (read-only). Values: 0 = unknown,
+1 = power button, 2 = scheduled, 3 = charger connected, 4 = USB.
+.SS Configuration
+.TP
+.B /sys/kernel/photonicat-pm/charger_on_auto_start
+Charger auto-start control (read-write). Write 1 to enable automatic
+startup when charger is connected, 0 to disable.
+.SH DEVICE TREE
+The driver reads configuration from the device tree node at probe time.
+.SS Required Properties
+.TP
+.B compatible
+Must be \(dqphotonicat-pm\(dq.
+.SS Optional Properties
+.TP
+.B power-gpio
+GPIO pin wired to PMU power-sense input (active high). Pulled low at
+shutdown to signal the PMU. Get the pin from the board schematic; omit
+if no such wire exists.
+.TP
+.B baudrate
+Serial port baud rate. Must match the PMU firmware's configured speed.
+Default: 115200.
+.TP
+.B force-poweroff-timeout
+Forced power off timeout in seconds (0\\-255). Sent to the PMU via
+WATCHDOG_TIMEOUT_SET command at driver probe. When non-zero, the PMU will
+force power off after this many seconds following a software shutdown.
+Practical range is 0\\-60; values >60 are ineffective because the driver
+also sends a hardcoded 60 s watchdog timeout that triggers first.
+When set to 0, only the 60 s watchdog guards against hangs.
+Default: 0 (disabled).
+.TP
+.B pm-version
+PMU protocol version (1 or 2). Determined by the PMU firmware on the
+board. Version 2 adds battery current, energy, and voltage reporting.
+Default: 1.
+.TP
+.B #thermal-sensor-cells
+Must be
+.B <0>
+when present. Exposes the motherboard temperature to the kernel thermal
+framework so that a
+.B thermal-zones
+binding in the board DTS can reference this node via
+.BR thermal-sensors .
+Without this property the driver still registers an hwmon sensor but no
+thermal zone.
+.SH HWMON SENSORS
+The driver registers hardware monitoring devices accessible via
+.BR sensors (1):
+.TP
+.B pcat_pm_hwmon_temp_mb-*
+Motherboard temperature sensor.
+.TP
+.B pcat_pm_hwmon_speed_fan-*
+Fan speed in RPM.
+.PP
+The motherboard temperature is also registered as a kernel thermal zone
+(see
+.B /sys/class/thermal/thermal_zone*/
+above) when the device tree provides the required binding.
+.SH EXAMPLES
+.TP
+Read battery capacity:
+.B cat /sys/class/power_supply/battery/capacity
+.TP
+Check fan management state:
+.B cat /sys/kernel/photonicat-pm/fan_state
+.TP
+Set fan to 50%:
+.B echo 50 > /sys/class/thermal/cooling_device0/cur_state
+.TP
+Check motion detection:
+.B cat /sys/kernel/photonicat-pm/movement_trigger
+.TP
+Turn on status LED:
+.B echo 1 > /sys/kernel/photonicat-pm/status_led
+.TP
+Turn off beeper:
+.B echo 0 > /sys/kernel/photonicat-pm/beeper
+.TP
+Read PMU firmware version:
+.B cat /sys/kernel/photonicat-pm/pmu_fw_version
+.TP
+Read power-on event:
+.B cat /sys/kernel/photonicat-pm/power_on_event
+.TP
+Set net LED blink pattern (50ms on, 50ms off):
+.B "echo 50 > /sys/kernel/photonicat-pm/net_status_led_on_time && echo 50 > /sys/kernel/photonicat-pm/net_status_led_off_time"
+.TP
+Power off now, automatically power on after 60 seconds:
+.B rtcwake -m off -s 60
+.TP
+Power off now, automatically power on at the specified time:
+.B rtcwake -m off -t $(date -d \(dq2026-02-11 08:00:00\(dq +%s)
+.TP
+Enable charger auto-start:
+.B echo 1 > /sys/kernel/photonicat-pm/charger_on_auto_start
+.SH FILES
+.TP
+.I /dev/pcat-pm-ctl
+Raw PMU command interface
+.TP
+.I /sys/kernel/photonicat-pm/
+Sysfs attributes
+.SH DEBUGGING
+PMU command logging uses the kernel
+.BR dev_dbg (9)
+facility. Messages are off by default.
+.SS Runtime (Dynamic Debug)
+If the kernel has
+.B CONFIG_DYNAMIC_DEBUG
+enabled (most distributions do):
+.PP
+.RS
+.nf
+# Enable PMU command logs
+echo 'file pcat\-pm\-uart.c +p' > /sys/kernel/debug/dynamic_debug/control
+
+# Disable
+echo 'file pcat\-pm\-uart.c \-p' > /sys/kernel/debug/dynamic_debug/control
+
+# View logs
+dmesg | grep "PMU cmd="
+.fi
+.RE
+.SS Build Time
+Add
+.B \-DDEBUG
+to the module CFLAGS in
+.I src/Makefile
+to enable all
+.BR dev_dbg (9)
+messages unconditionally:
+.PP
+.RS
+.nf
+ccflags\-y += \-DDEBUG
+.fi
+.RE
+.SH SEE ALSO
+.BR sensors (1),
+.BR hwmon (4),
+.BR rtc (4),
+.BR rtcwake (8),
+.BR power_supply (4),
+.BR thermal (4)
+.SH AUTHORS
+Kyosuke Nekoyashiki <supercatexpert@gmail.com>
+.br
+HackingGate <i@hackinggate.com>
