@@ -1,3 +1,12 @@
+photonicat-pm (1.0.1-1) unstable; urgency=medium
+
+  * Fix RTC validity handling for photonicat2 PMU status reporting.
+  * Return 0 from RTC set_time() and scheduled boot operations on success.
+  * Refresh cached RTC state after successful time synchronization.
+  * Prevent stale PMU RTC status bits from incorrectly blocking valid RTC reads.
+
+ -- HackingGate <i@hackinggate.com>  Sat, 11 Apr 2026 21:37:00 +0900
+
 photonicat-pm (1.0.0-1) unstable; urgency=medium
 
   * Initial release
