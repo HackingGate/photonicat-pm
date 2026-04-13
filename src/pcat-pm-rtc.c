@@ -10,11 +10,36 @@
 
 #include "photonicat-pm.h"
 
+#define PCAT_PM_RTC_ACK_TIMEOUT_MS 1000
+
+static void pcat_pm_rtc_ack_reset(struct pcat_pm_data *pm_data, bool *ack_seen,
+	u16 *ack_frame, u8 *ack_status)
+{
+	mutex_lock(&pm_data->mutex);
+	*ack_seen = false;
+	*ack_frame = 0;
+	*ack_status = 0;
+	mutex_unlock(&pm_data->mutex);
+}
+
+static int pcat_pm_rtc_wait_for_ack(struct pcat_pm_data *pm_data, bool *ack_seen,
+	u16 *ack_frame, u8 *ack_status, u16 expected_frame)
+{
+	long timeout;
+
+	timeout = wait_event_timeout(pm_data->rtc_cmd_wait,
+		READ_ONCE(*ack_seen) && READ_ONCE(*ack_frame) == expected_frame,
+		msecs_to_jiffies(PCAT_PM_RTC_ACK_TIMEOUT_MS));
+	if (!timeout)
+		return -ETIMEDOUT;
+
+	return READ_ONCE(*ack_status) ? -EIO : 0;
+}
+
 static int pcat_pm_rtc_read_time(struct device *dev, struct rtc_time *t)
 {
 	struct pcat_pm_data *pm_data = pcat_pm_get_data_from_dev(dev);
 	struct rtc_time rtc_time = { 0 };
-	int status;
 	unsigned int try_count;
 
 	/* Wait up to 2 seconds for the first status report from PMU */
@@ -27,11 +52,9 @@ static int pcat_pm_rtc_read_time(struct device *dev, struct rtc_time *t)
 			rtc_time.tm_hour = pm_data->rtc_hour;
 			rtc_time.tm_min = pm_data->rtc_min;
 			rtc_time.tm_sec = pm_data->rtc_sec;
-			status = pm_data->rtc_status;
+			rtc_time.tm_wday = pm_data->rtc_wday;
 			mutex_unlock(&pm_data->mutex);
 
-			if (status & 0x01)
-				return -EINVAL;
 			if (rtc_valid_tm(&rtc_time))
 				return -EINVAL;
 
@@ -39,7 +62,7 @@ static int pcat_pm_rtc_read_time(struct device *dev, struct rtc_time *t)
 			return 0;
 		}
 		mutex_unlock(&pm_data->mutex);
-		
+
 		msleep(100);
 	}
 
@@ -51,6 +74,7 @@ static int pcat_pm_rtc_set_time(struct device *dev, struct rtc_time *t)
 	struct pcat_pm_data *pm_data = pcat_pm_get_data_from_dev(dev);
 	u8 date_data[7];
 	u16 y;
+	u16 frame_num;
 	int ret;
 
 	if (rtc_valid_tm(t))
@@ -65,10 +89,19 @@ static int pcat_pm_rtc_set_time(struct device *dev, struct rtc_time *t)
 	date_data[5] = t->tm_min;
 	date_data[6] = t->tm_sec;
 
-	ret = pcat_pm_uart_write_data(pm_data, PCAT_PM_COMMAND_DATE_TIME_SYNC,
-		date_data, 7, true, 0);
+	mutex_lock(&pm_data->rtc_cmd_mutex);
+	pcat_pm_rtc_ack_reset(pm_data, &pm_data->rtc_sync_ack_seen,
+		&pm_data->rtc_sync_ack_frame, &pm_data->rtc_sync_ack_status);
+	ret = pcat_pm_uart_write_data_frame(pm_data, PCAT_PM_COMMAND_DATE_TIME_SYNC,
+		date_data, 7, true, 0, &frame_num);
 	if (ret < 0)
-		return ret;
+		goto out_unlock;
+
+	ret = pcat_pm_rtc_wait_for_ack(pm_data, &pm_data->rtc_sync_ack_seen,
+		&pm_data->rtc_sync_ack_frame, &pm_data->rtc_sync_ack_status,
+		frame_num);
+	if (ret < 0)
+		goto out_unlock;
 
 	mutex_lock(&pm_data->mutex);
 	pm_data->rtc_year = y;
@@ -77,10 +110,14 @@ static int pcat_pm_rtc_set_time(struct device *dev, struct rtc_time *t)
 	pm_data->rtc_hour = t->tm_hour;
 	pm_data->rtc_min = t->tm_min;
 	pm_data->rtc_sec = t->tm_sec;
-	pm_data->rtc_status = 0;
+	pm_data->rtc_wday = t->tm_wday % 7;
 	mutex_unlock(&pm_data->mutex);
 
-	return 0;
+	ret = 0;
+
+out_unlock:
+	mutex_unlock(&pm_data->rtc_cmd_mutex);
+	return ret;
 }
 
 /**
@@ -97,29 +134,40 @@ static int pcat_pm_schedule_boot_send(struct pcat_pm_data *pm_data)
 	u8 schedule_data[8];
 	bool already_sent, enabled;
 	struct rtc_time alarm;
+	u16 frame_num;
 	u16 year;
 	int ret;
 
+	mutex_lock(&pm_data->rtc_cmd_mutex);
 	mutex_lock(&pm_data->mutex);
 	already_sent = pm_data->schedule_boot_sent;
 	enabled = pm_data->alarm_enabled;
 	alarm = pm_data->alarm_time;
 	mutex_unlock(&pm_data->mutex);
 
-	if (already_sent)
-		return 0;
+	if (already_sent) {
+		ret = 0;
+		goto out_unlock;
+	}
+
+	pcat_pm_rtc_ack_reset(pm_data, &pm_data->schedule_boot_ack_seen,
+		&pm_data->schedule_boot_ack_frame,
+		&pm_data->schedule_boot_ack_status);
 
 	if (!enabled) {
-		ret = pcat_pm_uart_write_data(pm_data,
+		ret = pcat_pm_uart_write_data_frame(pm_data,
 			PCAT_PM_COMMAND_SCHEDULE_STARTUP_TIME_SET,
-			NULL, 0, true, 0);
+			NULL, 0, true, 0, &frame_num);
 		if (ret < 0)
-			return ret;
+			goto out_unlock;
 
-		mutex_lock(&pm_data->mutex);
-		pm_data->schedule_boot_sent = true;
-		mutex_unlock(&pm_data->mutex);
-		return 0;
+		ret = pcat_pm_rtc_wait_for_ack(pm_data,
+			&pm_data->schedule_boot_ack_seen,
+			&pm_data->schedule_boot_ack_frame,
+			&pm_data->schedule_boot_ack_status, frame_num);
+		if (ret < 0)
+			goto out_unlock;
+		goto mark_sent;
 	}
 
 	year = alarm.tm_year + 1900;
@@ -132,16 +180,27 @@ static int pcat_pm_schedule_boot_send(struct pcat_pm_data *pm_data)
 	schedule_data[6] = 0; /* dow_bits: unused for specific date */
 	schedule_data[7] = 0x1F; /* enable year|month|day|hour|minute */
 
-	ret = pcat_pm_uart_write_data(pm_data,
+	ret = pcat_pm_uart_write_data_frame(pm_data,
 		PCAT_PM_COMMAND_SCHEDULE_STARTUP_TIME_SET,
-		schedule_data, 8, true, 0);
+		schedule_data, 8, true, 0, &frame_num);
 	if (ret < 0)
-		return ret;
+		goto out_unlock;
 
+	ret = pcat_pm_rtc_wait_for_ack(pm_data, &pm_data->schedule_boot_ack_seen,
+		&pm_data->schedule_boot_ack_frame,
+		&pm_data->schedule_boot_ack_status, frame_num);
+	if (ret < 0)
+		goto out_unlock;
+
+mark_sent:
 	mutex_lock(&pm_data->mutex);
 	pm_data->schedule_boot_sent = true;
 	mutex_unlock(&pm_data->mutex);
-	return 0;
+	ret = 0;
+
+out_unlock:
+	mutex_unlock(&pm_data->rtc_cmd_mutex);
+	return ret;
 }
 
 static int pcat_pm_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
@@ -188,16 +247,24 @@ static int pcat_pm_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled
 static int pcat_pm_rtc_ioctl(struct device *dev, unsigned int cmd, unsigned long arg)
 {
 	struct pcat_pm_data *pm_data = pcat_pm_get_data_from_dev(dev);
-	int status;
+	struct rtc_time rtc_time = { 0 };
+	bool rtc_ready;
 	int flags = 0;
 
 	switch (cmd) {
 	case RTC_VL_READ:
 		mutex_lock(&pm_data->mutex);
-		status = pm_data->rtc_status;
+		rtc_ready = pm_data->rtc_year != 0;
+		rtc_time.tm_year = pm_data->rtc_year ? pm_data->rtc_year - 1900 : 0;
+		rtc_time.tm_mon = pm_data->rtc_month;
+		rtc_time.tm_mday = pm_data->rtc_day;
+		rtc_time.tm_hour = pm_data->rtc_hour;
+		rtc_time.tm_min = pm_data->rtc_min;
+		rtc_time.tm_sec = pm_data->rtc_sec;
+		rtc_time.tm_wday = pm_data->rtc_wday;
 		mutex_unlock(&pm_data->mutex);
 
-		if (status & 0x01)
+		if (!rtc_ready || rtc_valid_tm(&rtc_time))
 			flags |= RTC_VL_DATA_INVALID;
 
 		return put_user(flags, (unsigned int __user *)arg);
@@ -231,7 +298,6 @@ int pcat_pm_rtc_probe(struct pcat_pm_data *pm_data)
 	pm_data->rtc->range_max = RTC_TIMESTAMP_END_2099;
 	pm_data->rtc->ops = &pcat_pm_rtcops;
 	set_bit(RTC_FEATURE_ALARM, pm_data->rtc->features);
-	pm_data->rtc_status = 2;
 
 	ret = devm_rtc_register_device(pm_data->rtc);
 	if (ret) {
