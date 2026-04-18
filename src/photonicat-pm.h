@@ -188,7 +188,7 @@ typedef enum {
  * @rtc_hour: RTC hour
  * @rtc_min: RTC minute
  * @rtc_sec: RTC second
- * @rtc_status: RTC status (0 = valid, non-zero = error)
+ * @rtc_wday: RTC day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
  * @fan_ctrl_speed: Fan control setting (0-100%)
  * @fan_managed: True once the driver has explicitly set fan speed
  * @movement_timestamp: Last movement detection time (ns)
@@ -224,6 +224,7 @@ struct pcat_pm_data {
 	struct miscdevice ctl_device;
 	struct mutex ctl_mutex;
 	wait_queue_head_t ctl_wait;
+	wait_queue_head_t rtc_cmd_wait;
 
 	/* Sysfs */
 	struct kobject kobject;
@@ -250,6 +251,7 @@ struct pcat_pm_data {
 
 	/* Status report state (protected by @mutex) */
 	struct mutex mutex;
+	struct mutex rtc_cmd_mutex;
 	u64 status_report_timestamp;
 	u64 status_report_timeout_warn_timestamp;
 
@@ -283,7 +285,13 @@ struct pcat_pm_data {
 	u8 rtc_hour;
 	u8 rtc_min;
 	u8 rtc_sec;
-	u8 rtc_status;
+	u8 rtc_wday;
+	u16 rtc_sync_ack_frame;
+	u16 schedule_boot_ack_frame;
+	u8 rtc_sync_ack_status;
+	u8 schedule_boot_ack_status;
+	bool rtc_sync_ack_seen;
+	bool schedule_boot_ack_seen;
 
 	/* RTC alarm (schedule boot) */
 	struct rtc_time alarm_time;
@@ -364,19 +372,28 @@ typedef void (*pcat_pm_cmd_exec_func)(struct pcat_pm_data *pm_data,
 u16 pcat_pm_compute_crc16(const u8 *data, size_t len);
 
 /**
- * pcat_pm_uart_write_data - Send a command to the PMU
+ * pcat_pm_uart_write_data_frame - Send a command to the PMU
  * @pm_data: Driver data
  * @command: Command type to send
  * @extra_data: Optional payload data
  * @extra_data_len: Payload length (max 512)
  * @need_ack: Request acknowledgment from PMU
  * @timeout: Timeout in jiffies (0 for non-blocking)
+ * @frame_num: Optional output for the assigned frame number
  *
  * Return: Number of bytes written or negative error
  */
-int pcat_pm_uart_write_data(struct pcat_pm_data *pm_data,
+int pcat_pm_uart_write_data_frame(struct pcat_pm_data *pm_data,
 	u16 command, const u8 *extra_data, u16 extra_data_len,
-	bool need_ack, long timeout);
+	bool need_ack, long timeout, u16 *frame_num);
+
+static inline int pcat_pm_uart_write_data(struct pcat_pm_data *pm_data,
+	u16 command, const u8 *extra_data, u16 extra_data_len,
+	bool need_ack, long timeout)
+{
+	return pcat_pm_uart_write_data_frame(pm_data, command, extra_data,
+		extra_data_len, need_ack, timeout, NULL);
+}
 
 /**
  * pcat_pm_uart_receive_parse - Parse received UART data
