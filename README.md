@@ -224,12 +224,14 @@ last SET value.
 >
 > **State 1: After a power button shutdown.**
 > Do one of:
-> 1. Unplug AC power
+> 1. Ensure AC power is unplugged
 > 2. Hold to power on again
 >
 > **State 2: After a software shutdown.**
 > Do:
-> 1. Unplug AC power
+> 1. Ensure AC power is unplugged
+>
+> The next boot will have PMU auto speed restored.
 
 ```bash
 # Check if the driver has set a fixed speed
