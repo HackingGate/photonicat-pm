@@ -183,7 +183,7 @@ battery: battery {
 |----------|------|---------|------|-------------|
 | `power-gpio` | GPIO | (none) | Hardware | GPIO pin wired to PMU power-sense input. Pulled low at shutdown to signal the PMU. Get the pin from the board schematic; omit if no such wire exists. |
 | `baudrate` | `<u32>` | 115200 | Hardware | UART baud rate. Must match the PMU firmware's configured speed. |
-| `pm-version` | `<u32>` | 1 | Hardware | PMU protocol version (1 or 2). Determined by the PMU firmware on the board. Version 2 adds battery current, energy, and voltage reporting. |
+| `pm-version` | `<u32>` | 1 | Hardware | PMU protocol version (1 or 2). Determined by the PMU firmware on the board. Version 2 adds battery current and PMU-reported capacity. |
 | `force-poweroff-timeout` | `<u32>` | 0 (disabled) | Config | Forced power-off timeout in seconds (0–255). Sent to the PMU via `WATCHDOG_TIMEOUT_SET` command at driver probe. When non-zero, the PMU will force power off after this many seconds following a software shutdown. Practical range is 0–60; values >60 are ineffective because the driver also sends a hardcoded 60s watchdog timeout that triggers first. When set to 0, only the 60s watchdog guards against hangs. Safety net for stuck shutdowns. |
 | `#thermal-sensor-cells` | `<0>` | (not set) | Config | Exposes the motherboard temperature to the kernel thermal framework. Must be `<0>` (no per-sensor arguments). Required when a `thermal-zones` binding in the board DTS references this node via `thermal-sensors`. Without this, the driver still registers an hwmon sensor but no thermal zone. |
 
