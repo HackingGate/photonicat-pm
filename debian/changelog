@@ -4,8 +4,13 @@ photonicat-pm (1.0.1-1) unstable; urgency=medium
   * Return 0 from RTC set_time() and scheduled boot operations on success.
   * Refresh cached RTC state after successful time synchronization.
   * Prevent stale PMU RTC status bits from incorrectly blocking valid RTC reads.
+  * Remove unsupported battery energy_now export from PMU protocol v2.
+  * Clarify PMU protocol v2 battery reporting and fan auto-speed restoration
+    documentation.
+  * Refresh GitHub Actions build, artifact upload, and release actions.
+  * Remove obsolete Dependabot auto-merge workflow.
 
- -- HackingGate <i@hackinggate.com>  Sat, 11 Apr 2026 21:37:00 +0900
+ -- HackingGate <i@hackinggate.com>  Mon, 04 May 2026 15:13:10 +0900
 
 photonicat-pm (1.0.0-1) unstable; urgency=medium
 
