@@ -190,8 +190,10 @@ static int pcat_pm_probe(struct serdev_device *serdev)
 	pm_data->work_flag = true;
 
 	mutex_init(&pm_data->mutex);
+	mutex_init(&pm_data->rtc_cmd_mutex);
 	mutex_init(&pm_data->ctl_mutex);
 	init_waitqueue_head(&pm_data->ctl_wait);
+	init_waitqueue_head(&pm_data->rtc_cmd_wait);
 
 	pm_data->status_report_timestamp = ktime_get_boottime_ns();
 	pm_data->status_report_timeout_warn_timestamp = pm_data->status_report_timestamp;

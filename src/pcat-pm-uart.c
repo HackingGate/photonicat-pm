@@ -46,6 +46,19 @@ u16 pcat_pm_compute_crc16(const u8 *data, size_t len)
 	return crc;
 }
 
+static void pcat_pm_record_rtc_ack(struct pcat_pm_data *pm_data, bool *ack_seen,
+	u16 *ack_frame, u8 *ack_status, u16 frame_num, const u8 *extra_data,
+	u16 extra_data_len)
+{
+	mutex_lock(&pm_data->mutex);
+	*ack_frame = frame_num;
+	*ack_status = extra_data_len > 0 ? extra_data[0] : 0;
+	*ack_seen = true;
+	mutex_unlock(&pm_data->mutex);
+
+	wake_up(&pm_data->rtc_cmd_wait);
+}
+
 /**
  * pcat_pm_uart_write_data - Send a command packet to PMU
  * @pm_data: Driver data
@@ -59,9 +72,9 @@ u16 pcat_pm_compute_crc16(const u8 *data, size_t len)
  *
  * Return: Bytes written on success, negative errno on failure
  */
-int pcat_pm_uart_write_data(struct pcat_pm_data *pm_data,
+int pcat_pm_uart_write_data_frame(struct pcat_pm_data *pm_data,
 	u16 command, const u8 *extra_data, u16 extra_data_len,
-	bool need_ack, long timeout)
+	bool need_ack, long timeout, u16 *frame_num)
 {
 	u8 data[1024];
 	size_t data_size = 0;
@@ -75,6 +88,8 @@ int pcat_pm_uart_write_data(struct pcat_pm_data *pm_data,
 
 	/* Frame number (auto-incrementing) */
 	mutex_lock(&pm_data->mutex);
+	if (frame_num)
+		*frame_num = pm_data->write_framenum;
 	data[data_size] = pm_data->write_framenum & 0xFF;
 	data[data_size + 1] = (pm_data->write_framenum >> 8) & 0xFF;
 	data_size += 2;
@@ -132,6 +147,12 @@ int pcat_pm_uart_write_data(struct pcat_pm_data *pm_data,
 
 	if (ret < 0)
 		dev_err(&pm_data->serdev->dev, "Failed to write serial port: %d\n", ret);
+	else if ((size_t)ret != data_size) {
+		dev_err(&pm_data->serdev->dev,
+			"Short serial write for command 0x%04X: %d/%zu bytes\n",
+			command, ret, data_size);
+		return -EIO;
+	}
 
 	return ret;
 }
@@ -237,7 +258,7 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	pm_data->rtc_hour = data[12];
 	pm_data->rtc_min = data[13];
 	pm_data->rtc_sec = data[14];
-	pm_data->rtc_status = data[15];
+	pm_data->rtc_wday = data[15] % 7;
 	pm_data->board_temp = temp;
 	pm_data->gs_x = gs_x;
 	pm_data->gs_y = gs_y;
@@ -324,12 +345,19 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 		break;
 
 	case PCAT_PM_COMMAND_DATE_TIME_SYNC_ACK:
+		pcat_pm_record_rtc_ack(pm_data, &pm_data->rtc_sync_ack_seen,
+			&pm_data->rtc_sync_ack_frame, &pm_data->rtc_sync_ack_status,
+			frame_num, extra_data, extra_data_len);
 		if (extra_data_len > 0 && extra_data[0])
 			dev_err(&pm_data->serdev->dev, "Failed to sync date: %d\n",
 				extra_data[0]);
 		break;
 
 	case PCAT_PM_COMMAND_SCHEDULE_STARTUP_TIME_SET_ACK:
+		pcat_pm_record_rtc_ack(pm_data, &pm_data->schedule_boot_ack_seen,
+			&pm_data->schedule_boot_ack_frame,
+			&pm_data->schedule_boot_ack_status, frame_num,
+			extra_data, extra_data_len);
 		if (extra_data_len > 0 && extra_data[0])
 			dev_err(&pm_data->serdev->dev,
 				"Failed to set schedule boot: %d\n",
