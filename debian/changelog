@@ -1,3 +1,14 @@
+photonicat-pm (1.0.2-1) unstable; urgency=medium
+
+  * Fix battery capacity reporting when PMU firmware RA2E1260306000 reports
+    a stuck 100% state of charge while the pack is still charging.
+  * Preserve older PMU firmware behavior by only applying the stuck-SOC quirk
+    to the affected firmware version.
+  * Use the battery design capacity for ENERGY_FULL instead of unsupported PMU
+    status report energy fields.
+
+ -- HackingGate <i@hackinggate.com>  Wed, 06 May 2026 13:11:20 +0900
+
 photonicat-pm (1.0.1-1) unstable; urgency=medium
 
   * Fix RTC validity handling for photonicat2 PMU status reporting.
