@@ -228,6 +228,7 @@ int pcat_pm_charger_probe(struct pcat_pm_data *pm_data)
 	pm_data->battery_design_min_uv = bat_info->voltage_min_design_uv;
 	pm_data->battery_design_max_uv = bat_info->voltage_max_design_uv;
 	pm_data->battery_voltage_now = pm_data->battery_design_max_uv;
+	pm_data->battery_energy_full = pm_data->battery_design_uwh;
 	pm_data->battery_soc = 100;
 	pm_data->battery_info = bat_info;
 	pm_data->on_charger = true;
