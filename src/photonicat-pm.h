@@ -313,6 +313,7 @@ struct pcat_pm_data {
 	/* PMU information */
 	char pmu_hw_version[32];
 	char pmu_fw_version[32];
+	bool battery_soc_stuck_100_quirk;
 	u8 power_on_event;
 
 	/* Network status LED */

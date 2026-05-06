@@ -46,6 +46,37 @@ u16 pcat_pm_compute_crc16(const u8 *data, size_t len)
 	return crc;
 }
 
+static int pcat_pm_charge_voltage_to_soc(u16 battery_voltage)
+{
+	static const struct {
+		u16 voltage;
+		int capacity;
+	} charge_curve[] = {
+		{ 8400, 100 }, { 8300, 90 }, { 8200, 80 }, { 8100, 70 },
+		{ 8000, 60 }, { 7900, 50 }, { 7800, 40 }, { 7700, 30 },
+		{ 7600, 20 }, { 7500, 10 }, { 7400, 0 },
+	};
+	int i;
+
+	if (battery_voltage >= charge_curve[0].voltage)
+		return charge_curve[0].capacity;
+
+	for (i = 1; i < ARRAY_SIZE(charge_curve); i++) {
+		const u16 high_voltage = charge_curve[i - 1].voltage;
+		const u16 low_voltage = charge_curve[i].voltage;
+		const int high_capacity = charge_curve[i - 1].capacity;
+		const int low_capacity = charge_curve[i].capacity;
+
+		if (battery_voltage >= low_voltage) {
+			return low_capacity + (battery_voltage - low_voltage) *
+				(high_capacity - low_capacity) /
+				(high_voltage - low_voltage);
+		}
+	}
+
+	return charge_curve[ARRAY_SIZE(charge_curve) - 1].capacity;
+}
+
 static void pcat_pm_record_rtc_ack(struct pcat_pm_data *pm_data, bool *ack_seen,
 	u16 *ack_frame, u8 *ack_status, u16 frame_num, const u8 *extra_data,
 	u16 extra_data_len)
@@ -177,8 +208,8 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	bool on_battery, on_charger;
 	bool prev_on_battery, prev_on_charger;
 	bool notify_power_supply = false;
-	int soc;
-	u32 energy_now = 0, energy_full = 0;
+	int soc = 0, ocv_soc = -EINVAL, pmu_soc = -EINVAL;
+	bool charging = false;
 	int gs_x = 0, gs_y = 0, gs_z = 0;
 	bool gs_ready = false;
 	u32 fan_rpm = 0;
@@ -201,6 +232,7 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 		temp = (int)data[17] - 100;
 		battery_current_raw = data[18] + ((u16)data[19] << 8);
 		battery_current = (s16)battery_current_raw;
+		charging = (battery_current < -50);
 		/*
 		 * PMU raw current sign: positive = discharging (out of battery),
 		 * negative = charging (into battery).
@@ -214,17 +246,25 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 		on_battery = !on_charger;
 	}
 
-	/* Bytes 22-30: SOC and energy (v2 protocol) */
-	if (data_len >= 31) {
-		energy_now = data[23] | ((u32)data[24] << 8) |
-			((u32)data[25] << 16) | ((u32)data[26] << 24);
-		energy_full = data[27] | ((u32)data[28] << 8) |
-			((u32)data[29] << 16) | ((u32)data[30] << 24);
-
-		soc = data[22];
-	} else {
-		soc = power_supply_batinfo_ocv2cap(
+	if (pm_data->battery_info) {
+		ocv_soc = power_supply_batinfo_ocv2cap(
 			pm_data->battery_info, (int)battery_voltage * 1000, 20);
+		soc = ocv_soc;
+	}
+
+	/*
+	 * OCV overestimates SOC while the pack is being actively charged. Use a
+	 * charging-voltage curve here, then treat PMU SOC as advisory.
+	 */
+	if (charging)
+		soc = pcat_pm_charge_voltage_to_soc(battery_voltage);
+
+	if (data_len >= 31) {
+		pmu_soc = data[22];
+		if (pmu_soc <= 100 &&
+		    !(READ_ONCE(pm_data->battery_soc_stuck_100_quirk) &&
+		      pmu_soc == 100 && soc < 100))
+			soc = pmu_soc;
 	}
 
 	/* Bytes 35-51: Accelerometer and fan speed */
@@ -248,8 +288,8 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	pm_data->charger_voltage_now = charger_voltage * 1000;
 	pm_data->battery_current_now = -battery_current * 1000;
 	pm_data->battery_soc = soc;
-	pm_data->battery_energy_now = energy_now * 1000;
-	pm_data->battery_energy_full = energy_full * 1000;
+	pm_data->battery_energy_now = 0;
+	pm_data->battery_energy_full = pm_data->battery_design_uwh;
 	pm_data->on_battery = on_battery;
 	pm_data->on_charger = on_charger;
 	pm_data->rtc_year = data[8] + ((u16)data[9] << 8);
@@ -397,6 +437,9 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 			mutex_lock(&pm_data->mutex);
 			memcpy(pm_data->pmu_fw_version, extra_data, copy_len);
 			pm_data->pmu_fw_version[copy_len] = '\0';
+			WRITE_ONCE(pm_data->battery_soc_stuck_100_quirk,
+				!strcmp(pm_data->pmu_fw_version,
+					"RA2E1260306000"));
 			mutex_unlock(&pm_data->mutex);
 
 			dev_info(&pm_data->serdev->dev,
