@@ -4,6 +4,9 @@
 
 Linux kernel driver for the Photonicat 2 power management unit (PMU).
 
+See the [Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki)
+for MCU firmware inspection and flashing workflows.
+
 ## Features
 
 ### Power Supply
@@ -13,11 +16,17 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 | `/sys/class/power_supply/battery/` | Battery status, capacity (0–100%), voltage, and current (read-only). |
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
+> [!CAUTION]
+> As of MCU firmware `RA2E1260306000`, PMU protocol v2 status-report energy values are not validated as live or measured battery energy. This driver ignores PMU-reported energy values: `energy_full` is the static `energy-full-design-microwatt-hours` value from the `simple-battery` device-tree node, not PMU-measured full capacity; `energy_now` is not exported by current releases.
+
 ### Real-Time Clock & Scheduled Boot
 
 | Interface | Description |
 |-----------|-------------|
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
+
+> [!CAUTION]
+> As of MCU firmware `RA2E1260306000`, the hardware RTC is broken. Do not rely on `/dev/rtc0`, RTC alarms, or scheduled boot via `rtcwake(8)` until the MCU firmware is fixed.
 
 ### Sensors & Fan
 
@@ -26,8 +35,8 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 | `sensors pcat_pm_hwmon_temp_mb-*` | Motherboard temperature sensor (read-only). |
 | `sensors pcat_pm_hwmon_speed_fan-*` | Fan speed in RPM (read-only). |
 | `/sys/class/thermal/thermal_zone*/` | Motherboard temperature as a kernel thermal zone (requires `#thermal-sensor-cells = <0>` in the `pcat-pm` DT node and a `thermal-zones` binding referencing it). When present, the kernel thermal governor can automatically drive the fan cooling device based on temperature. |
-| `/sys/class/thermal/cooling_device*/` | Fan control via thermal cooling device interface. Values 0–100 set fixed fan speed percentage. |
-| `/sys/kernel/photonicat-pm/fan_state` | Fan speed mode (read-only). Returns `unmanaged` if the driver has not sent a SET command since loading (the PMU could be at auto speed or at a previously-set fixed speed from before a reboot; see [CAUTION](#fan-control) for how to restore auto speed), or the fixed speed percentage (0–100) set by the driver. |
+| `/sys/class/thermal/cooling_device*/` | Fan control via the thermal cooling device whose `type` is `pcat-pm-fan`. Cooling-device indexes are not stable; discover the device by type before writing `cur_state`. Values 0–100 set fixed fan speed percentage. |
+| `/sys/kernel/photonicat-pm/fan_state` | Fan speed mode (read-only). Returns `unmanaged` or the fixed speed percentage (0–100) set by the driver; see [Fan Control](#fan-control) for semantics and caveats. |
 
 ### LEDs & Peripherals
 
@@ -197,6 +206,12 @@ cat /sys/class/power_supply/battery/capacity
 
 cat /sys/class/power_supply/battery/status
 # Charging or Discharging
+
+cat /sys/class/power_supply/battery/energy_full
+# Static design full charge capacity from device tree, not live/measured capacity
+
+test ! -e /sys/class/power_supply/battery/energy_now
+# energy_now is intentionally not exported by current driver releases
 ```
 
 ### Fan Control
@@ -216,9 +231,11 @@ However, when the system shuts down, the software stops and the PMU retains the
 last SET value.
 
 > [!CAUTION]
-> Unmanaged may refer the last fixed speed sometimes (not the PMU auto), and is dangerous for thermal management.
+> As of MCU firmware `RA2E1260306000`, the MCU exposes no API to reset fan control back to PMU auto speed. The steps below are workarounds to restore PMU auto speed.
 >
-> When in managed fan speed, after shutdown, the fan stays at the last fixed speed. If the device is still charging or thermally active, the fan will not adjust on its own.
+> Due to that MCU limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
+>
+> When in managed fan speed, after shutdown, the fan stays at the last fixed speed and will not adjust on its own. If the retained speed is low and the device is still charging or otherwise thermally active, this can be unsafe for thermal management.
 >
 > To restore PMU auto speed:
 >
@@ -233,22 +250,49 @@ last SET value.
 >
 > The next boot will have PMU auto speed restored.
 
-```bash
-# Check if the driver has set a fixed speed
+Check whether the driver has set a fixed speed:
+
+```sh
 cat /sys/kernel/photonicat-pm/fan_state
-# "unmanaged" = driver has not sent a SET command since loading
-#               (PMU could be at unmanaged fan speed or at a previously-set managed fan speed;
-#                see CAUTION above for how to restore auto speed)
-# 0-100       = managed fan speed percentage set by the driver
+```
 
-# Set fan to 50% (switches PMU to managed speed)
-echo 50 > /sys/class/thermal/cooling_device0/cur_state
+`unmanaged` is the driver-local state described in the caution above. A value
+from 0 to 100 is the managed fan speed percentage set by the driver.
 
-# Set fan to maximum
-echo 100 > /sys/class/thermal/cooling_device0/cur_state
+The following commands can be pasted from `bash`, `zsh`, or `fish`. They run the
+write through `sudo sh -c` so the privileged shell performs the `cur_state`
+redirection.
 
-# Read current setting
-cat /sys/class/thermal/cooling_device0/cur_state
+Set fan speed (switches PMU to managed speed). Replace the final argument with
+the fixed speed percentage to set; use `100` for maximum:
+
+```sh
+sudo sh -c '
+speed=$1
+fan_cdev=
+for cdev in /sys/class/thermal/cooling_device*; do
+    [ "$(cat "$cdev/type" 2>/dev/null)" = "pcat-pm-fan" ] || continue
+    fan_cdev=$cdev
+    break
+done
+[ -n "$fan_cdev" ] || { echo "pcat-pm-fan cooling device not found" >&2; exit 1; }
+echo "$speed" > "$fan_cdev/cur_state"
+' sh 50
+```
+
+Read current setting:
+
+```sh
+sh -c '
+fan_cdev=
+for cdev in /sys/class/thermal/cooling_device*; do
+    [ "$(cat "$cdev/type" 2>/dev/null)" = "pcat-pm-fan" ] || continue
+    fan_cdev=$cdev
+    break
+done
+[ -n "$fan_cdev" ] || { echo "pcat-pm-fan cooling device not found" >&2; exit 1; }
+cat "$fan_cdev/cur_state"
+'
 ```
 
 ### Movement Detection
