@@ -4,6 +4,9 @@
 
 Linux kernel driver for the Photonicat 2 power management unit (PMU).
 
+See the [Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki)
+for MCU firmware inspection and flashing workflows.
+
 ## Features
 
 ### Power Supply
