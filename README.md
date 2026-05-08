@@ -14,7 +14,7 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, PMU protocol v2 status-report energy values must not be treated as live or measured battery energy. The driver ignores those PMU energy fields: `energy_full` is the static `energy-full-design-microwatt-hours` value from the `simple-battery` device-tree node, and `energy_now` is not exported.
+> As of MCU firmware `RA2E1260306000`, PMU protocol v2 status-report energy values are not validated as live or measured battery energy. This driver ignores PMU-reported energy values: `energy_full` is the static `energy-full-design-microwatt-hours` value from the `simple-battery` device-tree node, not PMU-measured full capacity; `energy_now` is not exported by current releases. Future firmware support should be enabled only after firmware or capability validation.
 
 ### Real-Time Clock & Scheduled Boot
 
@@ -208,7 +208,7 @@ cat /sys/class/power_supply/battery/energy_full
 # Static design full charge capacity from device tree, not live/measured capacity
 
 test ! -e /sys/class/power_supply/battery/energy_now
-# energy_now is intentionally not exported
+# energy_now is intentionally not exported by current driver releases
 ```
 
 ### Fan Control
@@ -228,7 +228,7 @@ However, when the system shuts down, the software stops and the PMU retains the
 last SET value.
 
 > [!CAUTION]
-> Unmanaged may refer the last fixed speed sometimes (not the PMU auto), and is dangerous for thermal management.
+> As of MCU firmware `RA2E1260306000`, `unmanaged` may refer the last fixed speed sometimes (not the PMU auto), and is dangerous for thermal management.
 >
 > When in managed fan speed, after shutdown, the fan stays at the last fixed speed. If the device is still charging or thermally active, the fan will not adjust on its own.
 >
