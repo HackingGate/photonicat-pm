@@ -8,12 +8,15 @@
  * SET command (via this cooling device, DT thermal policy, or other
  * software), the PMU switches to managed fan speed.
  *
- * CAUTION: Unmanaged may refer the last fixed speed sometimes (not the PMU auto),
- * and is dangerous for thermal management.
+ * CAUTION: As of MCU firmware RA2E1260306000, the MCU exposes no API to reset
+ * fan control back to PMU auto speed. The restore steps below are workarounds.
+ * Due to that MCU limitation, the driver's unmanaged state only means the
+ * driver has not sent a fan SET command since loading. It may sometimes mean
+ * the PMU retained the last fixed speed instead of returning to PMU auto speed.
  *
  * When in managed fan speed, after shutdown, the fan stays at the last fixed speed.
- * If the device is still charging or thermally active, the fan will not adjust on its
- * own.
+ * If the retained speed is low and the device is still charging or otherwise
+ * thermally active, this can be unsafe for thermal management.
  *
  * To restore PMU auto speed:
  *

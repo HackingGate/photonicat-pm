@@ -231,7 +231,9 @@ However, when the system shuts down, the software stops and the PMU retains the
 last SET value.
 
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, `unmanaged` may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
+> As of MCU firmware `RA2E1260306000`, the MCU exposes no API to reset fan control back to PMU auto speed. The steps below are workarounds to restore PMU auto speed.
+>
+> Due to that MCU limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
 >
 > When in managed fan speed, after shutdown, the fan stays at the last fixed speed and will not adjust on its own. If the retained speed is low and the device is still charging or otherwise thermally active, this can be unsafe for thermal management.
 >
