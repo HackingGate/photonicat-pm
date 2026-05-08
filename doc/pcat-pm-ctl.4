@@ -94,9 +94,11 @@ managed fan speed percentage (0\-100) once set by the driver.
 As of MCU firmware
 .BR RA2E1260306000 ,
 .B unmanaged
-may refer to the last fixed fan speed, not PMU auto control. In managed fan
-speed, after shutdown, the fan stays at the last fixed speed and will not
-adjust on its own while the device is charging or thermally active.
+may sometimes mean the PMU retained the last fixed fan speed instead of
+returning to PMU auto speed. In managed fan speed, after shutdown, the fan
+stays at the last fixed speed and will not adjust on its own. If the retained
+speed is low and the device is still charging or otherwise thermally active,
+this can be unsafe for thermal management.
 .SS LEDs & Peripherals
 .TP
 .B /sys/kernel/photonicat-pm/status_led
