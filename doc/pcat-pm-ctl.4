@@ -29,11 +29,16 @@ Battery status, capacity (0\-100%), voltage, and current (read-only).
 .IP
 As of MCU firmware
 .BR RA2E1260306000 ,
-PMU protocol v2 energy fields are not reliable live battery energy telemetry.
-The driver reports
+PMU protocol v2 status-report energy values must not be treated as live or
+measured battery energy. The driver ignores those PMU energy fields:
 .B energy_full
-from the battery design capacity in device tree, and does not export
-.BR energy_now .
+is the static
+.B energy-full-design-microwatt-hours
+value from the
+.B simple-battery
+device-tree node, and
+.B energy_now
+is not exported.
 .TP
 .B /sys/class/power_supply/charger/
 Charger online status and input voltage (read-only).
@@ -174,7 +179,7 @@ above) when the device tree provides the required binding.
 Read battery capacity:
 .B cat /sys/class/power_supply/battery/capacity
 .TP
-Read design full charge capacity:
+Read static design full charge capacity:
 .B cat /sys/class/power_supply/battery/energy_full
 .TP
 Check that live energy is not exported:
