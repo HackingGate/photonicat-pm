@@ -19,6 +19,9 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 |-----------|-------------|
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
 
+> [!CAUTION]
+> MCU firmware `RA2E1260306000` has a known broken hardware RTC. Do not rely on `/dev/rtc0`, RTC alarms, or scheduled boot via `rtcwake(8)` with that firmware until the MCU firmware is fixed.
+
 ### Sensors & Fan
 
 | Interface | Description |
