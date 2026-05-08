@@ -27,6 +27,8 @@ for the protocol frame format and command definitions.
 .B /sys/class/power_supply/battery/
 Battery status, capacity (0\-100%), voltage, and current (read-only).
 .IP
+As of MCU firmware
+.BR RA2E1260306000 ,
 PMU protocol v2 energy fields are not reliable live battery energy telemetry.
 The driver reports
 .B energy_full
@@ -46,6 +48,14 @@ powered off. The alarm is one-shot (non-recurring). Standard Linux
 RTC tools such as
 .BR rtcwake (8)
 work through this interface.
+.IP
+As of MCU firmware
+.BR RA2E1260306000 ,
+the hardware RTC is broken. Do not rely on
+.BR /dev/rtc0 ,
+RTC alarms, or scheduled boot via
+.BR rtcwake (8)
+until the MCU firmware is fixed.
 .SS Sensors & Fan
 .TP
 .B /sys/class/thermal/thermal_zone*/

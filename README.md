@@ -14,7 +14,7 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
 > [!CAUTION]
-> PMU protocol v2 energy fields are not reliable live battery energy telemetry. The driver reports `energy_full` from the battery design capacity in device tree, and does not export `energy_now`.
+> As of MCU firmware `RA2E1260306000`, PMU protocol v2 energy fields are not reliable live battery energy telemetry. The driver reports `energy_full` from the battery design capacity in device tree, and does not export `energy_now`.
 
 ### Real-Time Clock & Scheduled Boot
 
@@ -23,7 +23,7 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
 
 > [!CAUTION]
-> MCU firmware `RA2E1260306000` has a known broken hardware RTC. Do not rely on `/dev/rtc0`, RTC alarms, or scheduled boot via `rtcwake(8)` with that firmware until the MCU firmware is fixed.
+> As of MCU firmware `RA2E1260306000`, the hardware RTC is broken. Do not rely on `/dev/rtc0`, RTC alarms, or scheduled boot via `rtcwake(8)` until the MCU firmware is fixed.
 
 ### Sensors & Fan
 
