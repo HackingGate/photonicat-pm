@@ -248,15 +248,26 @@ last SET value.
 >
 > The next boot will have PMU auto speed restored.
 
-```bash
-# Check if the driver has set a fixed speed
-cat /sys/kernel/photonicat-pm/fan_state
-# "unmanaged" = driver has not sent a SET command since loading
-#               (PMU could be at unmanaged fan speed or at a previously-set managed fan speed;
-#                see CAUTION above for how to restore auto speed)
-# 0-100       = managed fan speed percentage set by the driver
+Check whether the driver has set a fixed speed:
 
-# Find the Photonicat fan cooling device. Do not assume a fixed cooling_device index.
+```sh
+cat /sys/kernel/photonicat-pm/fan_state
+```
+
+`unmanaged` means the driver has not sent a SET command since loading. The PMU
+could be at unmanaged fan speed or at a previously-set managed fan speed; see
+the caution above for how to restore auto speed. A value from 0 to 100 is the
+managed fan speed percentage set by the driver.
+
+The following commands can be pasted from `bash`, `zsh`, or `fish`. They run the
+write through `sudo sh -c` so the privileged shell performs the `cur_state`
+redirection.
+
+Set fan to 50% (switches PMU to managed speed):
+
+```sh
+sudo sh -c '
+speed=$1
 fan_cdev=
 for cdev in /sys/class/thermal/cooling_device*; do
     [ "$(cat "$cdev/type" 2>/dev/null)" = "pcat-pm-fan" ] || continue
@@ -264,15 +275,39 @@ for cdev in /sys/class/thermal/cooling_device*; do
     break
 done
 [ -n "$fan_cdev" ] || { echo "pcat-pm-fan cooling device not found" >&2; exit 1; }
+echo "$speed" > "$fan_cdev/cur_state"
+' sh 50
+```
 
-# Set fan to 50% (switches PMU to managed speed)
-echo 50 > "$fan_cdev/cur_state"
+Set fan to maximum:
 
-# Set fan to maximum
-echo 100 > "$fan_cdev/cur_state"
+```sh
+sudo sh -c '
+speed=$1
+fan_cdev=
+for cdev in /sys/class/thermal/cooling_device*; do
+    [ "$(cat "$cdev/type" 2>/dev/null)" = "pcat-pm-fan" ] || continue
+    fan_cdev=$cdev
+    break
+done
+[ -n "$fan_cdev" ] || { echo "pcat-pm-fan cooling device not found" >&2; exit 1; }
+echo "$speed" > "$fan_cdev/cur_state"
+' sh 100
+```
 
-# Read current setting
+Read current setting:
+
+```sh
+sh -c '
+fan_cdev=
+for cdev in /sys/class/thermal/cooling_device*; do
+    [ "$(cat "$cdev/type" 2>/dev/null)" = "pcat-pm-fan" ] || continue
+    fan_cdev=$cdev
+    break
+done
+[ -n "$fan_cdev" ] || { echo "pcat-pm-fan cooling device not found" >&2; exit 1; }
 cat "$fan_cdev/cur_state"
+'
 ```
 
 ### Movement Detection

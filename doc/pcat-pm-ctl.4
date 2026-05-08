@@ -202,9 +202,11 @@ Check that live energy is not exported:
 Check fan management state:
 .B cat /sys/kernel/photonicat-pm/fan_state
 .TP
-Set fan to 50%:
+Set fan to 50% from bash, zsh, or fish:
 .RS
 .nf
+sudo sh \-c '
+speed=$1
 fan_cdev=
 for cdev in /sys/class/thermal/cooling_device*; do
     [ "$(cat "$cdev/type" 2>/dev/null)" = "pcat\-pm\-fan" ] || continue
@@ -212,7 +214,8 @@ for cdev in /sys/class/thermal/cooling_device*; do
     break
 done
 [ \-n "$fan_cdev" ] || { echo "pcat\-pm\-fan cooling device not found" >&2; exit 1; }
-echo 50 > "$fan_cdev/cur_state"
+echo "$speed" > "$fan_cdev/cur_state"
+' sh 50
 .fi
 .RE
 .TP
