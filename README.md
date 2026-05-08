@@ -36,7 +36,7 @@ for MCU firmware inspection and flashing workflows.
 | `sensors pcat_pm_hwmon_speed_fan-*` | Fan speed in RPM (read-only). |
 | `/sys/class/thermal/thermal_zone*/` | Motherboard temperature as a kernel thermal zone (requires `#thermal-sensor-cells = <0>` in the `pcat-pm` DT node and a `thermal-zones` binding referencing it). When present, the kernel thermal governor can automatically drive the fan cooling device based on temperature. |
 | `/sys/class/thermal/cooling_device*/` | Fan control via the thermal cooling device whose `type` is `pcat-pm-fan`. Cooling-device indexes are not stable; discover the device by type before writing `cur_state`. Values 0–100 set fixed fan speed percentage. |
-| `/sys/kernel/photonicat-pm/fan_state` | Fan speed mode (read-only). Returns `unmanaged` if the driver has not sent a SET command since loading (the PMU could be at auto speed or at a previously-set fixed speed from before a reboot; see [CAUTION](#fan-control) for how to restore auto speed), or the fixed speed percentage (0–100) set by the driver. |
+| `/sys/kernel/photonicat-pm/fan_state` | Fan speed mode (read-only). Returns `unmanaged` or the fixed speed percentage (0–100) set by the driver; see [Fan Control](#fan-control) for semantics and caveats. |
 
 ### LEDs & Peripherals
 
@@ -256,16 +256,15 @@ Check whether the driver has set a fixed speed:
 cat /sys/kernel/photonicat-pm/fan_state
 ```
 
-`unmanaged` means the driver has not sent a SET command since loading. The PMU
-could be at unmanaged fan speed or at a previously-set managed fan speed; see
-the caution above for how to restore auto speed. A value from 0 to 100 is the
-managed fan speed percentage set by the driver.
+`unmanaged` is the driver-local state described in the caution above. A value
+from 0 to 100 is the managed fan speed percentage set by the driver.
 
 The following commands can be pasted from `bash`, `zsh`, or `fish`. They run the
 write through `sudo sh -c` so the privileged shell performs the `cur_state`
 redirection.
 
-Set fan to 50% (switches PMU to managed speed):
+Set fan speed (switches PMU to managed speed). Replace the final argument with
+the fixed speed percentage to set; use `100` for maximum:
 
 ```sh
 sudo sh -c '
@@ -279,22 +278,6 @@ done
 [ -n "$fan_cdev" ] || { echo "pcat-pm-fan cooling device not found" >&2; exit 1; }
 echo "$speed" > "$fan_cdev/cur_state"
 ' sh 50
-```
-
-Set fan to maximum:
-
-```sh
-sudo sh -c '
-speed=$1
-fan_cdev=
-for cdev in /sys/class/thermal/cooling_device*; do
-    [ "$(cat "$cdev/type" 2>/dev/null)" = "pcat-pm-fan" ] || continue
-    fan_cdev=$cdev
-    break
-done
-[ -n "$fan_cdev" ] || { echo "pcat-pm-fan cooling device not found" >&2; exit 1; }
-echo "$speed" > "$fan_cdev/cur_state"
-' sh 100
 ```
 
 Read current setting:

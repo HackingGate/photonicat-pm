@@ -499,27 +499,8 @@ int pcat_pm_hwmon_probe(struct pcat_pm_data *pm_data);
  * WARNING: The PMU uses unmanaged fan speed by default. Once any fan speed is
  * set via this cooling device, DT thermal policy, or other software,
  * the PMU switches to managed fan speed.
- *
- * CAUTION: As of MCU firmware RA2E1260306000, the MCU exposes no API to reset
- * fan control back to PMU auto speed. The restore steps below are workarounds.
- * Due to that MCU limitation, the driver's unmanaged state only means the
- * driver has not sent a fan SET command since loading. It may sometimes mean
- * the PMU retained the last fixed speed instead of returning to PMU auto speed.
- *
- * When in managed fan speed, after shutdown, the fan stays at the last fixed speed.
- * If the retained speed is low and the device is still charging or otherwise
- * thermally active, this can be unsafe for thermal management.
- *
- * To restore PMU auto speed:
- *
- * State 1: After a power button shutdown.
- * Do one of:
- * 1. Unplug AC power
- * 2. Hold to power on again
- *
- * State 2: After a software shutdown.
- * Do:
- * 1. Unplug AC power
+ * See pcat-pm-fan.c and the README Fan Control section for MCU auto-speed
+ * reset limitations and restore workarounds.
  *
  * Return: 0 on success, negative error otherwise
  */
