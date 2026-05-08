@@ -7,7 +7,7 @@ photonicat-pm (1.0.2-1) unstable; urgency=medium
   * Use the battery design capacity for ENERGY_FULL instead of unsupported PMU
     status report energy fields.
 
- -- HackingGate <i@hackinggate.com>  Wed, 06 May 2026 13:11:20 +0900
+ -- HackingGate <i@hackinggate.com>  Fri, 08 May 2026 20:02:53 +0900
 
 photonicat-pm (1.0.1-1) unstable; urgency=medium
 
