@@ -35,7 +35,7 @@ for MCU firmware inspection and flashing workflows.
 | `sensors pcat_pm_hwmon_temp_mb-*` | Motherboard temperature sensor (read-only). |
 | `sensors pcat_pm_hwmon_speed_fan-*` | Fan speed in RPM (read-only). |
 | `/sys/class/thermal/thermal_zone*/` | Motherboard temperature as a kernel thermal zone (requires `#thermal-sensor-cells = <0>` in the `pcat-pm` DT node and a `thermal-zones` binding referencing it). When present, the kernel thermal governor can automatically drive the fan cooling device based on temperature. |
-| `/sys/class/thermal/cooling_device*/` | Fan control via thermal cooling device interface. Values 0–100 set fixed fan speed percentage. |
+| `/sys/class/thermal/cooling_device*/` | Fan control via the thermal cooling device whose `type` is `pcat-pm-fan`. Cooling-device indexes are not stable; discover the device by type before writing `cur_state`. Values 0–100 set fixed fan speed percentage. |
 | `/sys/kernel/photonicat-pm/fan_state` | Fan speed mode (read-only). Returns `unmanaged` if the driver has not sent a SET command since loading (the PMU could be at auto speed or at a previously-set fixed speed from before a reboot; see [CAUTION](#fan-control) for how to restore auto speed), or the fixed speed percentage (0–100) set by the driver. |
 
 ### LEDs & Peripherals
@@ -256,14 +256,23 @@ cat /sys/kernel/photonicat-pm/fan_state
 #                see CAUTION above for how to restore auto speed)
 # 0-100       = managed fan speed percentage set by the driver
 
+# Find the Photonicat fan cooling device. Do not assume a fixed cooling_device index.
+fan_cdev=
+for cdev in /sys/class/thermal/cooling_device*; do
+    [ "$(cat "$cdev/type" 2>/dev/null)" = "pcat-pm-fan" ] || continue
+    fan_cdev=$cdev
+    break
+done
+[ -n "$fan_cdev" ] || { echo "pcat-pm-fan cooling device not found" >&2; exit 1; }
+
 # Set fan to 50% (switches PMU to managed speed)
-echo 50 > /sys/class/thermal/cooling_device0/cur_state
+echo 50 > "$fan_cdev/cur_state"
 
 # Set fan to maximum
-echo 100 > /sys/class/thermal/cooling_device0/cur_state
+echo 100 > "$fan_cdev/cur_state"
 
 # Read current setting
-cat /sys/class/thermal/cooling_device0/cur_state
+cat "$fan_cdev/cur_state"
 ```
 
 ### Movement Detection

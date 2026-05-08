@@ -75,7 +75,13 @@ binding references it. When present, the kernel thermal governor can
 automatically drive the fan cooling device based on board temperature.
 .TP
 .B /sys/class/thermal/cooling_device*/
-Fan control via thermal cooling device interface.
+Fan control via the thermal cooling device whose
+.B type
+attribute is
+.BR pcat\-pm\-fan .
+Cooling-device indexes are not stable; discover the device by type before
+writing
+.BR cur_state .
 Values 0\-100 set fan speed percentage.
 .TP
 .B /sys/kernel/photonicat-pm/fan_state
@@ -197,7 +203,18 @@ Check fan management state:
 .B cat /sys/kernel/photonicat-pm/fan_state
 .TP
 Set fan to 50%:
-.B echo 50 > /sys/class/thermal/cooling_device0/cur_state
+.RS
+.nf
+fan_cdev=
+for cdev in /sys/class/thermal/cooling_device*; do
+    [ "$(cat "$cdev/type" 2>/dev/null)" = "pcat\-pm\-fan" ] || continue
+    fan_cdev=$cdev
+    break
+done
+[ \-n "$fan_cdev" ] || { echo "pcat\-pm\-fan cooling device not found" >&2; exit 1; }
+echo 50 > "$fan_cdev/cur_state"
+.fi
+.RE
 .TP
 Check motion detection:
 .B cat /sys/kernel/photonicat-pm/movement_trigger
