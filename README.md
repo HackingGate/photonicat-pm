@@ -13,6 +13,9 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 | `/sys/class/power_supply/battery/` | Battery status, capacity (0–100%), voltage, and current (read-only). |
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
+> [!CAUTION]
+> PMU protocol v2 energy fields are not reliable live battery energy telemetry. The driver reports `energy_full` from the battery design capacity in device tree, and does not export `energy_now`.
+
 ### Real-Time Clock & Scheduled Boot
 
 | Interface | Description |
@@ -200,6 +203,12 @@ cat /sys/class/power_supply/battery/capacity
 
 cat /sys/class/power_supply/battery/status
 # Charging or Discharging
+
+cat /sys/class/power_supply/battery/energy_full
+# Design full charge capacity from device tree, not PMU-measured live capacity
+
+test ! -e /sys/class/power_supply/battery/energy_now
+# energy_now is intentionally not exported
 ```
 
 ### Fan Control

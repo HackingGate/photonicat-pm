@@ -26,6 +26,12 @@ for the protocol frame format and command definitions.
 .TP
 .B /sys/class/power_supply/battery/
 Battery status, capacity (0\-100%), voltage, and current (read-only).
+.IP
+PMU protocol v2 energy fields are not reliable live battery energy telemetry.
+The driver reports
+.B energy_full
+from the battery design capacity in device tree, and does not export
+.BR energy_now .
 .TP
 .B /sys/class/power_supply/charger/
 Charger online status and input voltage (read-only).
@@ -157,6 +163,12 @@ above) when the device tree provides the required binding.
 .TP
 Read battery capacity:
 .B cat /sys/class/power_supply/battery/capacity
+.TP
+Read design full charge capacity:
+.B cat /sys/class/power_supply/battery/energy_full
+.TP
+Check that live energy is not exported:
+.B test ! \-e /sys/class/power_supply/battery/energy_now
 .TP
 Check fan management state:
 .B cat /sys/kernel/photonicat-pm/fan_state
