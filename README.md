@@ -14,7 +14,7 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, PMU protocol v2 status-report energy values are not validated as live or measured battery energy. This driver ignores PMU-reported energy values: `energy_full` is the static `energy-full-design-microwatt-hours` value from the `simple-battery` device-tree node, not PMU-measured full capacity; `energy_now` is not exported by current releases. Future firmware support should be enabled only after firmware or capability validation.
+> As of MCU firmware `RA2E1260306000`, PMU protocol v2 status-report energy values are not validated as live or measured battery energy. This driver ignores PMU-reported energy values: `energy_full` is the static `energy-full-design-microwatt-hours` value from the `simple-battery` device-tree node, not PMU-measured full capacity; `energy_now` is not exported by current releases.
 
 ### Real-Time Clock & Scheduled Boot
 
