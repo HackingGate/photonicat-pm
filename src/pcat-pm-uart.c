@@ -418,7 +418,7 @@ static void pcat_pm_ctl_forward_raw(struct pcat_pm_data *pm_data,
 			copy_from, copy_len);
 		pm_data->ctl_write_buffer_used += copy_len;
 	}
-	pm_data->ctl_write_buffer_ready = true;
+	WRITE_ONCE(pm_data->ctl_write_buffer_ready, true);
 	mutex_unlock(&pm_data->ctl_mutex);
 	wake_up_interruptible_all(&pm_data->ctl_wait);
 }

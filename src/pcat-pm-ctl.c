@@ -72,43 +72,42 @@ static ssize_t pcat_pm_ctl_dev_read(struct file *file, char *buffer,
 
 	pm_data = container_of(mdev, struct pcat_pm_data, ctl_device);
 
-	if (!pm_data->ctl_write_buffer_ready) {
+	for (;;) {
+		mutex_lock(&pm_data->ctl_mutex);
+		if (pm_data->ctl_write_buffer_used > 0)
+			break;
+		WRITE_ONCE(pm_data->ctl_write_buffer_ready, false);
+		mutex_unlock(&pm_data->ctl_mutex);
+
 		if (file->f_flags & O_NONBLOCK)
 			return -EAGAIN;
 
 		ret = wait_event_interruptible(pm_data->ctl_wait,
-			pm_data->ctl_write_buffer_ready);
+			READ_ONCE(pm_data->ctl_write_buffer_ready));
 		if (ret)
 			return ret;
 	}
 
-	mutex_lock(&pm_data->ctl_mutex);
-	if (pm_data->ctl_write_buffer_used > 0) {
-		if (copy_size > pm_data->ctl_write_buffer_used)
-			copy_size = pm_data->ctl_write_buffer_used;
-		ret = copy_to_user(buffer, pm_data->ctl_write_buffer, copy_size);
-		if (!ret) {
-			if (copy_size < pm_data->ctl_write_buffer_used) {
-				memmove(pm_data->ctl_write_buffer,
-					pm_data->ctl_write_buffer + copy_size,
-					pm_data->ctl_write_buffer_used - copy_size);
-				pm_data->ctl_write_buffer_used -= copy_size;
-			} else {
-				pm_data->ctl_write_buffer_used = 0;
-			}
-
-			if (pm_data->ctl_write_buffer_used == 0)
-				pm_data->ctl_write_buffer_ready = false;
+	if (copy_size > pm_data->ctl_write_buffer_used)
+		copy_size = pm_data->ctl_write_buffer_used;
+	ret = copy_to_user(buffer, pm_data->ctl_write_buffer, copy_size);
+	if (!ret) {
+		if (copy_size < pm_data->ctl_write_buffer_used) {
+			memmove(pm_data->ctl_write_buffer,
+				pm_data->ctl_write_buffer + copy_size,
+				pm_data->ctl_write_buffer_used - copy_size);
+			pm_data->ctl_write_buffer_used -= copy_size;
+		} else {
+			pm_data->ctl_write_buffer_used = 0;
 		}
-		mutex_unlock(&pm_data->ctl_mutex);
 
-		if (ret)
-			return -EFAULT;
-	} else {
-		pm_data->ctl_write_buffer_ready = false;
-		mutex_unlock(&pm_data->ctl_mutex);
-		copy_size = 0;
+		if (pm_data->ctl_write_buffer_used == 0)
+			WRITE_ONCE(pm_data->ctl_write_buffer_ready, false);
 	}
+	mutex_unlock(&pm_data->ctl_mutex);
+
+	if (ret)
+		return -EFAULT;
 
 	return copy_size;
 }
@@ -126,15 +125,15 @@ static ssize_t pcat_pm_ctl_dev_write(struct file *file, const char __user *buffe
 	if (count > PCAT_PM_BUFFER_SIZE)
 		count = PCAT_PM_BUFFER_SIZE;
 
-	mutex_lock(&pm_data->ctl_mutex);
+	mutex_lock(&pm_data->ctl_read_mutex);
 
 	if (copy_from_user(pm_data->ctl_read_buffer, buffer, count)) {
-		mutex_unlock(&pm_data->ctl_mutex);
+		mutex_unlock(&pm_data->ctl_read_mutex);
 		return -EFAULT;
 	}
 
 	if (count < 13) {
-		mutex_unlock(&pm_data->ctl_mutex);
+		mutex_unlock(&pm_data->ctl_read_mutex);
 		return count;
 	}
 
@@ -142,7 +141,7 @@ static ssize_t pcat_pm_ctl_dev_write(struct file *file, const char __user *buffe
 	expect_len = pm_data->ctl_read_buffer[5] +
 		((u16)pm_data->ctl_read_buffer[6] << 8);
 	if (expect_len + 10 > count) {
-		mutex_unlock(&pm_data->ctl_mutex);
+		mutex_unlock(&pm_data->ctl_read_mutex);
 		return count;
 	}
 
@@ -159,7 +158,7 @@ static ssize_t pcat_pm_ctl_dev_write(struct file *file, const char __user *buffe
 	pcat_pm_uart_receive_parse(pm_data, pm_data->ctl_read_buffer,
 		&pm_data->ctl_read_buffer_used, pcat_pm_ctl_cmd_exec);
 
-	mutex_unlock(&pm_data->ctl_mutex);
+	mutex_unlock(&pm_data->ctl_read_mutex);
 
 	return count;
 }
@@ -175,8 +174,10 @@ static __poll_t pcat_pm_ctl_dev_poll(struct file *file, poll_table *pt)
 	poll_wait(file, &pm_data->ctl_wait, pt);
 
 	mask = EPOLLOUT | EPOLLWRNORM;
-	if (pm_data->ctl_write_buffer_ready)
+	mutex_lock(&pm_data->ctl_mutex);
+	if (pm_data->ctl_write_buffer_used > 0)
 		mask |= EPOLLIN | EPOLLRDNORM;
+	mutex_unlock(&pm_data->ctl_mutex);
 
 	return mask;
 }
