@@ -1,3 +1,17 @@
+photonicat-pm (1.0.3-1) unstable; urgency=medium
+
+  * Forward PMU hardware and firmware version acknowledgment frames to
+    /dev/pcat-pm-ctl so unmodified pcat-pmu-updater version queries can read
+    PMU replies.
+  * Serialize raw-control input separately from output delivery so PMU ACK
+    frames remain readable by /dev/pcat-pm-ctl userspace consumers.
+  * Gate PMU behavior through firmware capability profiles and keep /dev/rtc0
+    registered while disabling broken RTC and scheduled boot operations on
+    RA2E1260306000.
+  * Document known, future, older, and unparseable PMU firmware policy.
+
+ -- HackingGate <i@hackinggate.com>  Sat, 16 May 2026 00:48:11 +0900
+
 photonicat-pm (1.0.2-1) unstable; urgency=medium
 
   * Fix battery capacity reporting when PMU firmware RA2E1260306000 reports
@@ -6,11 +20,6 @@ photonicat-pm (1.0.2-1) unstable; urgency=medium
     to the affected firmware version.
   * Use the battery design capacity for ENERGY_FULL instead of unsupported PMU
     status report energy fields.
-  * Gate PMU behavior through firmware capability profiles and keep /dev/rtc0
-    registered while disabling broken RTC and scheduled boot operations on
-    RA2E1260306000.
-  * Serialize raw-control input separately from output delivery so PMU ACK
-    frames remain readable by /dev/pcat-pm-ctl userspace consumers.
 
  -- HackingGate <i@hackinggate.com>  Fri, 08 May 2026 20:02:53 +0900
 
