@@ -18,6 +18,66 @@
 
 #include "photonicat-pm.h"
 
+static const char *pcat_pm_fw_profile_name(enum pcat_pm_fw_profile profile)
+{
+	switch (profile) {
+	case PCAT_PM_FW_PROFILE_RA2E1250918000:
+		return "legacy-known-good";
+	case PCAT_PM_FW_PROFILE_RA2E1260306000:
+		return "ra2e1260306000-denylisted";
+	case PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED:
+		return "ra2e1-unvalidated";
+	case PCAT_PM_FW_PROFILE_LEGACY:
+	default:
+		return "legacy";
+	}
+}
+
+static bool pcat_pm_fw_version_is_ra2e1(const char *version)
+{
+	unsigned int i;
+
+	if (strncmp(version, "RA2E1", 5))
+		return false;
+	if (strlen(version) != strlen("RA2E1260306000"))
+		return false;
+
+	for (i = 5; version[i] != '\0'; i++) {
+		if (version[i] < '0' || version[i] > '9')
+			return false;
+	}
+
+	return i > 5;
+}
+
+static bool pcat_pm_fw_version_is_future_ra2e1(const char *version)
+{
+	if (!pcat_pm_fw_version_is_ra2e1(version))
+		return false;
+
+	return strcmp(version, "RA2E1260306000") > 0;
+}
+
+static struct pcat_pm_fw_caps pcat_pm_fw_caps_for_version(const char *version)
+{
+	struct pcat_pm_fw_caps caps = {
+		.profile = PCAT_PM_FW_PROFILE_LEGACY,
+		.pmu_energy_valid = false,
+	};
+
+	if (!strcmp(version, "RA2E1260306000")) {
+		caps.profile = PCAT_PM_FW_PROFILE_RA2E1260306000;
+		caps.battery_soc_stuck_100_quirk = true;
+		caps.rtc_broken = true;
+	} else if (!strcmp(version, "RA2E1250918000")) {
+		caps.profile = PCAT_PM_FW_PROFILE_RA2E1250918000;
+	} else if (pcat_pm_fw_version_is_future_ra2e1(version)) {
+		caps.profile = PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED;
+	}
+
+	return caps;
+}
+
 /**
  * pcat_pm_compute_crc16 - Compute Modbus CRC16 checksum
  * @data: Input data buffer
@@ -262,7 +322,7 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	if (data_len >= 31) {
 		pmu_soc = data[22];
 		if (pmu_soc <= 100 &&
-		    !(READ_ONCE(pm_data->battery_soc_stuck_100_quirk) &&
+		    !(READ_ONCE(pm_data->pmu_fw_caps.battery_soc_stuck_100_quirk) &&
 		      pmu_soc == 100 && soc < 100))
 			soc = pmu_soc;
 	}
@@ -474,17 +534,19 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 		if (extra_data_len > 0) {
 			size_t copy_len = min_t(size_t, extra_data_len,
 				sizeof(pm_data->pmu_fw_version) - 1);
+			struct pcat_pm_fw_caps caps;
 
 			mutex_lock(&pm_data->mutex);
 			memcpy(pm_data->pmu_fw_version, extra_data, copy_len);
 			pm_data->pmu_fw_version[copy_len] = '\0';
-			WRITE_ONCE(pm_data->battery_soc_stuck_100_quirk,
-				!strcmp(pm_data->pmu_fw_version,
-					"RA2E1260306000"));
+			caps = pcat_pm_fw_caps_for_version(pm_data->pmu_fw_version);
+			pm_data->pmu_fw_caps = caps;
 			mutex_unlock(&pm_data->mutex);
 
 			dev_info(&pm_data->serdev->dev,
-				"PMU FW Version: %s\n", pm_data->pmu_fw_version);
+				"PMU FW Version: %s (%s capabilities)\n",
+				pm_data->pmu_fw_version,
+				pcat_pm_fw_profile_name(caps.profile));
 		}
 		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 		break;

@@ -7,6 +7,19 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 See the [Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki)
 for MCU firmware inspection and flashing workflows.
 
+## MCU Firmware Capability Policy
+
+The driver selects an internal capability profile when the PMU firmware version
+ACK is received. Known firmware keeps the maximum safe behavior, while unknown
+firmware avoids trusting fields that have not been validated.
+
+| Firmware version | Battery capacity policy | RTC / scheduled boot policy | Energy and fan policy |
+|------------------|-------------------------|-----------------------------|-----------------------|
+| `RA2E1250918000` | Legacy known-good profile; PMU SOC is accepted. | Enabled with normal `rtc_valid_tm()` checks. | PMU energy fields are ignored; `energy_full` is the device-tree design capacity and `energy_now` is not exported. No trusted PMU auto-speed reset API is exposed. |
+| `RA2E1260306000` | Stuck-100% quirk enabled; PMU SOC `100` is ignored when fallback SOC is below 100. | `/dev/rtc0` remains registered for ABI stability, but reads report invalid data and set-time/alarm operations return unsupported. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
+| Future `RA2E1*` | Runtime-gated baseline; existing version-independent status fields remain enabled, with no denylist quirks. | Enabled unless a future firmware is explicitly denylisted. | PMU energy fields and fan auto-speed reset are not trusted until validated. |
+| Older or unparseable | Legacy behavior is preserved; no `RA2E1260306000` quirks are applied. | Existing RTC behavior is preserved. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
+
 ## Features
 
 ### Power Supply
@@ -16,17 +29,11 @@ for MCU firmware inspection and flashing workflows.
 | `/sys/class/power_supply/battery/` | Battery status, capacity (0–100%), voltage, and current (read-only). |
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
-> [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, PMU protocol v2 status-report energy values are not validated as live or measured battery energy. This driver ignores PMU-reported energy values: `energy_full` is the static `energy-full-design-microwatt-hours` value from the `simple-battery` device-tree node, not PMU-measured full capacity; `energy_now` is not exported by current releases.
-
 ### Real-Time Clock & Scheduled Boot
 
 | Interface | Description |
 |-----------|-------------|
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
-
-> [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, the hardware RTC is broken. Do not rely on `/dev/rtc0`, RTC alarms, or scheduled boot via `rtcwake(8)` until the MCU firmware is fixed.
 
 ### Sensors & Fan
 
@@ -231,9 +238,9 @@ However, when the system shuts down, the software stops and the PMU retains the
 last SET value.
 
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, the MCU exposes no API to reset fan control back to PMU auto speed. The steps below are workarounds to restore PMU auto speed.
+> Current firmware capability profiles expose no trusted API to reset fan control back to PMU auto speed. The steps below are workarounds to restore PMU auto speed.
 >
-> Due to that MCU limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
+> Due to that firmware limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
 >
 > When in managed fan speed, after shutdown, the fan stays at the last fixed speed and will not adjust on its own. If the retained speed is low and the device is still charging or otherwise thermally active, this can be unsafe for thermal management.
 >
@@ -350,6 +357,9 @@ cat /sys/kernel/photonicat-pm/power_on_event
 ### Schedule Boot
 
 The driver registers an RTC device with alarm support. When an RTC alarm is set, the driver sends the alarm time to the PMU via UART (`SCHEDULE_STARTUP_TIME_SET`). The PMU stores this schedule and will power on the board at the specified time, even when the system is fully powered off. The alarm is one-shot (non-recurring).
+On firmware profiles with unsupported RTC hardware, such as `RA2E1260306000`,
+`/dev/rtc0` remains registered but RTC reads report invalid data and alarm
+programming fails instead of writing a broken PMU schedule.
 
 This integrates with standard Linux RTC tools such as `rtcwake(8)`:
 

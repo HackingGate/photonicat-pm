@@ -127,6 +127,20 @@ typedef enum {
 	PCAT_PM_COMMAND_DEVICE_MOVEMENT_ACK = 0x96,
 } PCatPMCommandType;
 
+enum pcat_pm_fw_profile {
+	PCAT_PM_FW_PROFILE_LEGACY = 0,
+	PCAT_PM_FW_PROFILE_RA2E1250918000,
+	PCAT_PM_FW_PROFILE_RA2E1260306000,
+	PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED,
+};
+
+struct pcat_pm_fw_caps {
+	enum pcat_pm_fw_profile profile;
+	bool battery_soc_stuck_100_quirk;
+	bool rtc_broken;
+	bool pmu_energy_valid;
+};
+
 /**
  * struct pcat_pm_data - Main driver state structure
  * @serdev: Serial device handle
@@ -197,6 +211,7 @@ typedef enum {
  * @beeper_enabled: Beeper enabled state
  * @pmu_hw_version: PMU hardware version string
  * @pmu_fw_version: PMU firmware version string
+ * @pmu_fw_caps: Capability profile selected from PMU firmware version
  * @power_on_event: Last power-on event code
  * @net_status_led_on_time: Network status LED on time (ms)
  * @net_status_led_off_time: Network status LED off time (ms)
@@ -313,7 +328,7 @@ struct pcat_pm_data {
 	/* PMU information */
 	char pmu_hw_version[32];
 	char pmu_fw_version[32];
-	bool battery_soc_stuck_100_quirk;
+	struct pcat_pm_fw_caps pmu_fw_caps;
 	u8 power_on_event;
 
 	/* Network status LED */

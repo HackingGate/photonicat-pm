@@ -24,15 +24,32 @@ the driver still updates the corresponding sysfs attributes internally.
 See
 .I photonicat-pm.h
 for the protocol frame format and command definitions.
+.SS MCU Firmware Capability Policy
+The driver selects an internal capability profile when the PMU firmware
+version acknowledgment is received. Known firmware keeps the maximum safe
+behavior, while unknown firmware avoids trusting fields that have not been
+validated.
+.TS
+tab(|);
+l l.
+Firmware|Driver policy
+RA2E1250918000|Legacy SOC; RTC yes; energy ignored.
+RA2E1260306000|Stuck-100%; RTC off; energy ignored.
+Future RA2E1*|Baseline; energy/fan untrusted.
+Older/invalid|Legacy; no denylist quirks.
+.TE
+.PP
+For ABI stability,
+.I /dev/rtc0
+remains registered even on firmware profiles with unsupported RTC hardware.
 .SS Power Supply
 .TP
 .B /sys/class/power_supply/battery/
 Battery status, capacity (0\-100%), voltage, and current (read-only).
 .IP
-As of MCU firmware
-.BR RA2E1260306000 ,
-PMU protocol v2 status-report energy values are not validated as live or
-measured battery energy. This driver ignores PMU-reported energy values:
+Current firmware capability profiles do not validate PMU protocol v2
+status-report energy values as live or measured battery energy. This driver
+ignores PMU-reported energy values:
 .B energy_full
 is the static
 .B energy-full-design-microwatt-hours
@@ -40,8 +57,7 @@ value from the
 .B simple-battery
 device-tree node, not PMU-measured full capacity;
 .B energy_now
-is not exported by current releases. Future firmware support should be enabled
-only after firmware or capability validation.
+is not exported by current releases.
 .TP
 .B /sys/class/power_supply/charger/
 Charger online status and input voltage (read-only).
@@ -57,13 +73,10 @@ RTC tools such as
 .BR rtcwake (8)
 work through this interface.
 .IP
-As of MCU firmware
+On firmware profiles with unsupported RTC hardware, such as
 .BR RA2E1260306000 ,
-the hardware RTC is broken. Do not rely on
-.BR /dev/rtc0 ,
-RTC alarms, or scheduled boot via
-.BR rtcwake (8)
-until the MCU firmware is fixed.
+the device remains registered but RTC reads report invalid data and alarm
+programming fails instead of writing a broken PMU schedule.
 .SS Sensors & Fan
 .TP
 .B /sys/class/thermal/thermal_zone*/
@@ -93,16 +106,15 @@ if the driver has not sent a SET command since loading (the PMU could be at
 unmanaged fan speed or at a previously-set managed fan speed from before a reboot), or the
 managed fan speed percentage (0\-100) once set by the driver.
 .IP
-As of MCU firmware
-.BR RA2E1260306000 ,
-the MCU exposes no API to reset fan control back to PMU auto speed.
+Current firmware capability profiles expose no trusted API to reset fan
+control back to PMU auto speed.
 .B unmanaged
 only means the driver has not sent a fan SET command since loading. Due to
-that MCU limitation, it may sometimes mean the PMU retained the last fixed fan
-speed instead of returning to PMU auto speed. In managed fan speed, after
-shutdown, the fan stays at the last fixed speed and will not adjust on its own.
-If the retained speed is low and the device is still charging or otherwise
-thermally active, this can be unsafe for thermal management.
+that limitation, it may sometimes mean the PMU retained the last fixed speed
+instead of returning to PMU auto speed. In managed fan speed, after shutdown,
+the fan stays at the last fixed speed and will not adjust on its own. If the
+retained speed is low and the device is still charging or otherwise thermally
+active, this can be unsafe for thermal management.
 .SS LEDs & Peripherals
 .TP
 .B /sys/kernel/photonicat-pm/status_led
