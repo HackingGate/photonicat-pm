@@ -1,6 +1,6 @@
 .\" SPDX-License-Identifier: GPL-3.0-or-later
 .\" Man page for photonicat-pm kernel driver
-.TH PCAT-PM-CTL 4 "February 2026" "Linux" "Linux Programmer's Manual"
+.TH PCAT-PM-CTL 4 "May 2026" "Linux" "Linux Programmer's Manual"
 .SH NAME
 pcat-pm-ctl \- Photonicat power manager control device
 .SH SYNOPSIS
@@ -41,6 +41,15 @@ All firmware|PMU SOC accepted when plausible; stuck-100% probed from status repo
 For ABI stability,
 .I /dev/rtc0
 remains registered while RTC capability is pending.
+Current test results are observations, not version-string feature gates:
+.B RA2E1250918000
+promotes to
+.BR enabled-probe
+and scheduled boot works, while
+.B RA2E1260306000
+remains
+.BR pending-probe
+and scheduled boot stays blocked by runtime validation.
 .SS Power Supply
 .TP
 .B /sys/class/power_supply/battery/

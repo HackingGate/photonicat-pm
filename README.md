@@ -19,6 +19,11 @@ known firmware version.
 |------------------|-------------------------|-----------------------------|-----------------------|
 | All firmware | PMU SOC is accepted when plausible. If status reports repeatedly show PMU SOC `100` while voltage-derived fallback SOC is below 100, the driver uses fallback SOC and enables the stuck-100% workaround after three consecutive mismatches. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, advancing PMU RTC samples promote it to `enabled-probe`. | PMU energy fields and fan auto-speed reset are not trusted by current driver releases. |
 
+Current test results are treated as observations, not version-string feature
+gates: `RA2E1250918000` promotes to `enabled-probe` and scheduled boot works,
+while `RA2E1260306000` remains `pending-probe` and scheduled boot stays
+blocked by runtime validation.
+
 ## Features
 
 ### Power Supply
