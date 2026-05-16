@@ -18,51 +18,8 @@
 
 #include "photonicat-pm.h"
 
-#define PCAT_PM_RA2E1_FW_VERSION_LEN 14
 #define PCAT_PM_RTC_PROBE_VALID_SAMPLES 3
 #define PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES 3
-
-static const char *pcat_pm_fw_profile_name(enum pcat_pm_fw_profile profile)
-{
-	switch (profile) {
-	case PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED:
-		return "ra2e1-unvalidated";
-	case PCAT_PM_FW_PROFILE_LEGACY:
-	default:
-		return "legacy";
-	}
-}
-
-static bool pcat_pm_fw_version_is_ra2e1(const char *version)
-{
-	unsigned int i;
-
-	if (strncmp(version, "RA2E1", 5))
-		return false;
-	if (strlen(version) != PCAT_PM_RA2E1_FW_VERSION_LEN)
-		return false;
-
-	for (i = 5; version[i] != '\0'; i++) {
-		if (version[i] < '0' || version[i] > '9')
-			return false;
-	}
-
-	return i > 5;
-}
-
-static struct pcat_pm_fw_caps pcat_pm_fw_caps_for_version(const char *version)
-{
-	struct pcat_pm_fw_caps caps = {
-		.profile = PCAT_PM_FW_PROFILE_LEGACY,
-		.rtc_capability = PCAT_PM_RTC_CAP_PENDING_PROBE,
-		.pmu_energy_valid = false,
-	};
-
-	if (pcat_pm_fw_version_is_ra2e1(version))
-		caps.profile = PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED;
-
-	return caps;
-}
 
 static bool pcat_pm_battery_soc_ignore_pmu_100(struct pcat_pm_data *pm_data,
 	int pmu_soc, int fallback_soc, bool fallback_soc_valid)
@@ -604,21 +561,18 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 		if (extra_data_len > 0) {
 			size_t copy_len = min_t(size_t, extra_data_len,
 				sizeof(pm_data->pmu_fw_version) - 1);
-			struct pcat_pm_fw_caps caps;
+			enum pcat_pm_rtc_capability rtc_capability;
 
 			mutex_lock(&pm_data->mutex);
 			memcpy(pm_data->pmu_fw_version, extra_data, copy_len);
 			pm_data->pmu_fw_version[copy_len] = '\0';
-			caps = pcat_pm_fw_caps_for_version(pm_data->pmu_fw_version);
-			caps.rtc_capability = pm_data->pmu_fw_caps.rtc_capability;
-			pm_data->pmu_fw_caps = caps;
+			rtc_capability = pm_data->pmu_fw_caps.rtc_capability;
 			mutex_unlock(&pm_data->mutex);
 
 			dev_info(&pm_data->serdev->dev,
-				"PMU FW Version: %s (%s capabilities, RTC %s)\n",
+				"PMU FW Version: %s (RTC %s)\n",
 				pm_data->pmu_fw_version,
-				pcat_pm_fw_profile_name(caps.profile),
-				pcat_pm_rtc_capability_name(caps.rtc_capability));
+				pcat_pm_rtc_capability_name(rtc_capability));
 		}
 		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 		break;

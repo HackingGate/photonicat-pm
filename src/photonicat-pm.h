@@ -127,11 +127,6 @@ typedef enum {
 	PCAT_PM_COMMAND_DEVICE_MOVEMENT_ACK = 0x96,
 } PCatPMCommandType;
 
-enum pcat_pm_fw_profile {
-	PCAT_PM_FW_PROFILE_LEGACY = 0,
-	PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED,
-};
-
 enum pcat_pm_rtc_capability {
 	PCAT_PM_RTC_CAP_PENDING_PROBE = 0,
 	PCAT_PM_RTC_CAP_ENABLED_PROBE,
@@ -157,9 +152,7 @@ static inline const char *pcat_pm_rtc_capability_name(
 }
 
 struct pcat_pm_fw_caps {
-	enum pcat_pm_fw_profile profile;
 	enum pcat_pm_rtc_capability rtc_capability;
-	bool pmu_energy_valid;
 };
 
 /**
@@ -237,7 +230,7 @@ struct pcat_pm_fw_caps {
  * @beeper_enabled: Beeper enabled state
  * @pmu_hw_version: PMU hardware version string
  * @pmu_fw_version: PMU firmware version string
- * @pmu_fw_caps: Capability profile selected from PMU firmware version
+ * @pmu_fw_caps: Runtime capability state for PMU-backed features
  * @power_on_event: Last power-on event code
  * @net_status_led_on_time: Network status LED on time (ms)
  * @net_status_led_off_time: Network status LED off time (ms)

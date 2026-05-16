@@ -17,8 +17,7 @@ known firmware version.
 
 | Firmware version | Battery capacity policy | RTC / scheduled boot policy | Energy and fan policy |
 |------------------|-------------------------|-----------------------------|-----------------------|
-| `RA2E1*` | PMU SOC is accepted when plausible. If status reports repeatedly show PMU SOC `100` while voltage-derived fallback SOC is below 100, the driver uses fallback SOC and enables the stuck-100% workaround after three consecutive mismatches. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, monotonic PMU RTC samples promote it to `enabled-probe`. | PMU energy fields and fan auto-speed reset are not trusted until validated. |
-| Older or unparseable | Legacy version-independent behavior is preserved with the same runtime stuck-100% SOC probe. | Starts as `pending-probe`; RTC is enabled only after the same runtime validation. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
+| All firmware | PMU SOC is accepted when plausible. If status reports repeatedly show PMU SOC `100` while voltage-derived fallback SOC is below 100, the driver uses fallback SOC and enables the stuck-100% workaround after three consecutive mismatches. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, monotonic PMU RTC samples promote it to `enabled-probe`. | PMU energy fields and fan auto-speed reset are not trusted by current driver releases. |
 
 ## Features
 
