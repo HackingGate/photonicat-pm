@@ -25,23 +25,23 @@ See
 .I photonicat-pm.h
 for the protocol frame format and command definitions.
 .SS MCU Firmware Capability Policy
-The driver selects an internal capability profile when the PMU firmware
-version acknowledgment is received. Known firmware keeps the maximum safe
-behavior, while unknown firmware avoids trusting fields that have not been
-validated.
+The driver selects non-RTC capability quirks when the PMU firmware version
+acknowledgment is received. RTC and scheduled boot do not trust firmware
+version strings: every firmware starts with RTC disabled as
+.BR pending-probe
+and must pass runtime validation before RTC operations are enabled.
 .TS
 tab(|);
 l l.
 Firmware|Driver policy
-RA2E1250918000|Legacy SOC; RTC enabled-version; energy ignored.
-RA2E1260306000|Stuck-100%; RTC disabled-denylist; energy ignored.
-Future RA2E1*|Baseline; RTC pending-probe until runtime validation; energy/fan untrusted.
-Older/invalid|Legacy; RTC enabled-version; no denylist quirks.
+RA2E1260306000|Stuck-100%; RTC pending-probe until runtime validation; energy ignored.
+Other RA2E1*|Baseline; RTC pending-probe until runtime validation; energy/fan untrusted.
+Older/invalid|Legacy; RTC pending-probe until runtime validation; no stuck-100% quirk.
 .TE
 .PP
 For ABI stability,
 .I /dev/rtc0
-remains registered even on firmware profiles with unsupported RTC hardware.
+remains registered while RTC capability is pending.
 .SS Power Supply
 .TP
 .B /sys/class/power_supply/battery/
@@ -73,16 +73,13 @@ RTC tools such as
 .BR rtcwake (8)
 work through this interface.
 .IP
-On firmware profiles with unsupported RTC hardware, such as
-.BR RA2E1260306000 ,
-the device remains registered but RTC reads report invalid data and alarm
-programming fails instead of writing a broken PMU schedule.
-Future
-.B RA2E1*
-firmware starts in
+All firmware starts in
 .BR pending-probe ;
-the driver enables RTC and scheduled boot only after three consecutive valid,
-monotonic PMU RTC samples.
+the device remains registered, but RTC reads report invalid data and alarm
+programming fails until the driver observes three consecutive valid, monotonic
+PMU RTC samples and promotes the capability to
+.BR enabled-probe .
+No firmware version string enables RTC or scheduled boot by itself.
 Raw scheduled-boot commands sent through
 .I /dev/pcat-pm-ctl
 are gated by the same RTC capability state.
@@ -162,9 +159,7 @@ to read the response through the control device.
 .TP
 .B /sys/kernel/photonicat-pm/pmu_rtc_capability
 PMU RTC policy state (read-only). Values:
-.BR enabled-version ,
-.BR disabled-denylist ,
-.BR pending-probe ,
+.BR pending-probe
 or
 .BR enabled-probe .
 .TP

@@ -129,33 +129,25 @@ typedef enum {
 
 enum pcat_pm_fw_profile {
 	PCAT_PM_FW_PROFILE_LEGACY = 0,
-	PCAT_PM_FW_PROFILE_RA2E1250918000,
 	PCAT_PM_FW_PROFILE_RA2E1260306000,
 	PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED,
 };
 
 enum pcat_pm_rtc_capability {
-	PCAT_PM_RTC_CAP_ENABLED_VERSION = 0,
-	PCAT_PM_RTC_CAP_DISABLED_DENYLIST,
-	PCAT_PM_RTC_CAP_PENDING_PROBE,
+	PCAT_PM_RTC_CAP_PENDING_PROBE = 0,
 	PCAT_PM_RTC_CAP_ENABLED_PROBE,
 };
 
 static inline bool pcat_pm_rtc_capability_enabled(
 	enum pcat_pm_rtc_capability capability)
 {
-	return capability == PCAT_PM_RTC_CAP_ENABLED_VERSION ||
-	       capability == PCAT_PM_RTC_CAP_ENABLED_PROBE;
+	return capability == PCAT_PM_RTC_CAP_ENABLED_PROBE;
 }
 
 static inline const char *pcat_pm_rtc_capability_name(
 	enum pcat_pm_rtc_capability capability)
 {
 	switch (capability) {
-	case PCAT_PM_RTC_CAP_ENABLED_VERSION:
-		return "enabled-version";
-	case PCAT_PM_RTC_CAP_DISABLED_DENYLIST:
-		return "disabled-denylist";
 	case PCAT_PM_RTC_CAP_PENDING_PROBE:
 		return "pending-probe";
 	case PCAT_PM_RTC_CAP_ENABLED_PROBE:

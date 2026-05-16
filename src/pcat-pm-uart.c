@@ -23,10 +23,8 @@
 static const char *pcat_pm_fw_profile_name(enum pcat_pm_fw_profile profile)
 {
 	switch (profile) {
-	case PCAT_PM_FW_PROFILE_RA2E1250918000:
-		return "legacy-known-good";
 	case PCAT_PM_FW_PROFILE_RA2E1260306000:
-		return "ra2e1260306000-denylisted";
+		return "ra2e1260306000-quirked";
 	case PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED:
 		return "ra2e1-unvalidated";
 	case PCAT_PM_FW_PROFILE_LEGACY:
@@ -52,31 +50,19 @@ static bool pcat_pm_fw_version_is_ra2e1(const char *version)
 	return i > 5;
 }
 
-static bool pcat_pm_fw_version_is_future_ra2e1(const char *version)
-{
-	if (!pcat_pm_fw_version_is_ra2e1(version))
-		return false;
-
-	return strcmp(version, "RA2E1260306000") > 0;
-}
-
 static struct pcat_pm_fw_caps pcat_pm_fw_caps_for_version(const char *version)
 {
 	struct pcat_pm_fw_caps caps = {
 		.profile = PCAT_PM_FW_PROFILE_LEGACY,
-		.rtc_capability = PCAT_PM_RTC_CAP_ENABLED_VERSION,
+		.rtc_capability = PCAT_PM_RTC_CAP_PENDING_PROBE,
 		.pmu_energy_valid = false,
 	};
 
 	if (!strcmp(version, "RA2E1260306000")) {
 		caps.profile = PCAT_PM_FW_PROFILE_RA2E1260306000;
 		caps.battery_soc_stuck_100_quirk = true;
-		caps.rtc_capability = PCAT_PM_RTC_CAP_DISABLED_DENYLIST;
-	} else if (!strcmp(version, "RA2E1250918000")) {
-		caps.profile = PCAT_PM_FW_PROFILE_RA2E1250918000;
-	} else if (pcat_pm_fw_version_is_future_ra2e1(version)) {
+	} else if (pcat_pm_fw_version_is_ra2e1(version)) {
 		caps.profile = PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED;
-		caps.rtc_capability = PCAT_PM_RTC_CAP_PENDING_PROBE;
 	}
 
 	return caps;
@@ -590,8 +576,7 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 			memcpy(pm_data->pmu_fw_version, extra_data, copy_len);
 			pm_data->pmu_fw_version[copy_len] = '\0';
 			caps = pcat_pm_fw_caps_for_version(pm_data->pmu_fw_version);
-			pm_data->rtc_probe_valid_samples = 0;
-			pm_data->rtc_probe_last_time = 0;
+			caps.rtc_capability = pm_data->pmu_fw_caps.rtc_capability;
 			pm_data->pmu_fw_caps = caps;
 			mutex_unlock(&pm_data->mutex);
 
