@@ -9,20 +9,29 @@ for MCU firmware inspection and flashing workflows.
 
 ## MCU Firmware Capability Policy
 
-The driver avoids enabling fragile PMU behavior solely from firmware version
-strings. RTC and scheduled boot start disabled as `pending-probe` and must pass
-runtime validation before RTC operations are enabled. The PMU SOC stuck-100%
-workaround is also runtime-detected from status reports instead of tied to a
-known firmware version.
+The driver treats firmware behavior as runtime-observed capability, not as a
+static firmware-version allowlist or denylist.
 
-| Firmware version | Battery capacity policy | RTC / scheduled boot policy | Energy and fan policy |
-|------------------|-------------------------|-----------------------------|-----------------------|
-| All firmware | PMU SOC is accepted when plausible. If status reports repeatedly show PMU SOC `100` while voltage-derived fallback SOC is below 100, the driver uses fallback SOC and enables the stuck-100% workaround after three consecutive mismatches. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, advancing PMU RTC samples promote it to `enabled-probe`. | PMU energy fields and fan auto-speed reset are not trusted by current driver releases. |
+- **RTC and scheduled boot**: start as `pending-probe`. `/dev/rtc0` remains
+  registered for ABI stability, but RTC reads, set-time, alarms, and raw
+  scheduled-boot commands are blocked until the PMU reports three consecutive
+  valid, advancing RTC samples. Passing that probe promotes
+  `pmu_rtc_capability` to `enabled-probe`.
+- **Battery capacity**: PMU SOC is accepted only while plausible. If status
+  reports repeatedly show PMU SOC `100` while the voltage-derived fallback SOC
+  is below 100, the driver uses fallback SOC and enables the stuck-100%
+  workaround after three consecutive suspicious samples.
+- **Energy and fan**: PMU protocol v2 energy fields and fan auto-speed reset are
+  not trusted by current driver releases. `energy_full` remains the static
+  device-tree design capacity, `energy_now` is not exported, and fan auto-speed
+  restoration requires the documented workarounds.
 
-Current test results are treated as observations, not version-string feature
-gates: `RA2E1250918000` promotes to `enabled-probe` and scheduled boot works,
-while `RA2E1260306000` remains `pending-probe` and scheduled boot stays
-blocked by runtime validation.
+Observed firmware results are evidence for diagnostics, not feature gates:
+
+| Firmware version | Observed runtime result |
+|------------------|-------------------------|
+| `RA2E1250918000` | RTC promotes to `enabled-probe`; scheduled boot works. |
+| `RA2E1260306000` | RTC remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
 
 ## Features
 
