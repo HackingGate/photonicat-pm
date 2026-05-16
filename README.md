@@ -9,18 +9,18 @@ for MCU firmware inspection and flashing workflows.
 
 ## MCU Firmware Capability Policy
 
-The driver treats firmware behavior as runtime-observed capability, not as a
-static firmware-version allowlist or denylist.
+The driver treats firmware behavior as runtime-observed capability or quirk
+detection, not as a static firmware-version allowlist or denylist.
 
 - **RTC and scheduled boot**: start as `pending-probe`. `/dev/rtc0` remains
   registered for ABI stability, but RTC reads, set-time, alarms, and raw
   scheduled-boot commands are blocked until the PMU reports three consecutive
   valid, advancing RTC samples. Passing that probe promotes
   `pmu_rtc_capability` to `enabled-probe`.
-- **Battery capacity**: PMU SOC is accepted only while plausible. If status
-  reports repeatedly show PMU SOC `100` while the voltage-derived fallback SOC
-  is below 100, the driver uses fallback SOC and enables the stuck-100%
-  workaround after three consecutive suspicious samples.
+- **Battery capacity**: starts by accepting plausible PMU SOC. If status reports
+  repeatedly show PMU SOC `100` while the voltage-derived fallback SOC is below
+  100, the driver treats that as a failed SOC probe, uses fallback SOC, and
+  enables the stuck-100% workaround after three consecutive suspicious samples.
 - **Energy and fan**: PMU protocol v2 energy fields and fan auto-speed reset are
   not trusted by current driver releases. `energy_full` remains the static
   device-tree design capacity, `energy_now` is not exported, and fan auto-speed
@@ -28,10 +28,10 @@ static firmware-version allowlist or denylist.
 
 Observed firmware results are evidence for diagnostics, not feature gates:
 
-| Firmware version | Observed runtime result |
-|------------------|-------------------------|
-| `RA2E1250918000` | RTC promotes to `enabled-probe`; scheduled boot works. |
-| `RA2E1260306000` | RTC remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
+| Firmware version | Observed RTC result | Observed SOC result |
+|------------------|---------------------|---------------------|
+| `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. | Stuck-100% workaround enabled after runtime validation. |
+| `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Stuck-100% workaround enabled after runtime validation. |
 
 ## Features
 
