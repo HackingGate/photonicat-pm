@@ -28,11 +28,25 @@ known firmware version.
 | `/sys/class/power_supply/battery/` | Battery status, capacity (0–100%), voltage, and current (read-only). |
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
+> [!CAUTION]
+> Known affected firmware: `RA2E1260306000`.
+> PMU SOC can stick at `100`, and PMU protocol v2 status-report energy values
+> are not validated as live or measured battery energy. The driver probes the
+> stuck-100% SOC workaround from status reports, ignores PMU-reported energy
+> values, keeps `energy_full` as the static device-tree design capacity, and
+> does not export `energy_now`.
+
 ### Real-Time Clock & Scheduled Boot
 
 | Interface | Description |
 |-----------|-------------|
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
+
+> [!CAUTION]
+> Known affected firmware: `RA2E1260306000`.
+> The hardware RTC reports broken values. `/dev/rtc0` remains registered for
+> ABI stability, but RTC reads report invalid data and alarm programming fails
+> until runtime validation promotes `pmu_rtc_capability` to `enabled-probe`.
 
 ### Sensors & Fan
 
@@ -238,7 +252,10 @@ However, when the system shuts down, the software stops and the PMU retains the
 last SET value.
 
 > [!CAUTION]
-> Current firmware capability profiles expose no trusted API to reset fan control back to PMU auto speed. The steps below are workarounds to restore PMU auto speed.
+> Known affected firmware: all tested firmware versions up to and including
+> `RA2E1260306000`.
+> No trusted API is exposed to reset fan control back to PMU auto speed. The
+> steps below are workarounds to restore PMU auto speed.
 >
 > Due to that firmware limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
 >
