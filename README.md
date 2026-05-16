@@ -15,10 +15,10 @@ firmware avoids trusting fields that have not been validated.
 
 | Firmware version | Battery capacity policy | RTC / scheduled boot policy | Energy and fan policy |
 |------------------|-------------------------|-----------------------------|-----------------------|
-| `RA2E1250918000` | Legacy known-good profile; PMU SOC is accepted. | Enabled with normal `rtc_valid_tm()` checks. | PMU energy fields are ignored; `energy_full` is the device-tree design capacity and `energy_now` is not exported. No trusted PMU auto-speed reset API is exposed. |
-| `RA2E1260306000` | Stuck-100% quirk enabled; PMU SOC `100` is ignored when fallback SOC is below 100. | `/dev/rtc0` remains registered for ABI stability, but reads report invalid data and set-time/alarm operations return unsupported. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
-| Future `RA2E1*` | Runtime-gated baseline; existing version-independent status fields remain enabled, with no denylist quirks. | Enabled unless a future firmware is explicitly denylisted. | PMU energy fields and fan auto-speed reset are not trusted until validated. |
-| Older or unparseable | Legacy behavior is preserved; no `RA2E1260306000` quirks are applied. | Existing RTC behavior is preserved. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
+| `RA2E1250918000` | Legacy known-good profile; PMU SOC is accepted. | `enabled-version`: enabled with normal `rtc_valid_tm()` checks. | PMU energy fields are ignored; `energy_full` is the device-tree design capacity and `energy_now` is not exported. No trusted PMU auto-speed reset API is exposed. |
+| `RA2E1260306000` | Stuck-100% quirk enabled; PMU SOC `100` is ignored when fallback SOC is below 100. | `disabled-denylist`: `/dev/rtc0` remains registered for ABI stability, but reads report invalid data and set-time/alarm operations return unsupported. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
+| Future `RA2E1*` | Runtime-gated baseline; existing version-independent status fields remain enabled, with no denylist quirks. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, monotonic PMU RTC samples promote it to `enabled-probe`. | PMU energy fields and fan auto-speed reset are not trusted until validated. |
+| Older or unparseable | Legacy behavior is preserved; no `RA2E1260306000` quirks are applied. | `enabled-version`: existing RTC behavior is preserved. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
 
 ## Features
 
@@ -62,6 +62,7 @@ firmware avoids trusting fields that have not been validated.
 |-----------|-------------|
 | `/sys/kernel/photonicat-pm/pmu_hw_version` | PMU hardware version string (read-only). Queried from PMU on driver load. |
 | `/sys/kernel/photonicat-pm/pmu_fw_version` | PMU firmware version string (read-only). Queried from PMU on driver load. |
+| `/sys/kernel/photonicat-pm/pmu_rtc_capability` | PMU RTC policy state (read-only). Values: `enabled-version`, `disabled-denylist`, `pending-probe`, or `enabled-probe`. |
 | `/sys/kernel/photonicat-pm/power_on_event` | Last power-on event code (read-only). Values: 0 = unknown, 1 = power button, 2 = scheduled, 3 = charger connected, 4 = USB. |
 
 ### Configuration
@@ -340,6 +341,7 @@ cat /sys/kernel/photonicat-pm/beeper
 ```bash
 cat /sys/kernel/photonicat-pm/pmu_hw_version
 cat /sys/kernel/photonicat-pm/pmu_fw_version
+cat /sys/kernel/photonicat-pm/pmu_rtc_capability
 ```
 
 The driver also forwards the raw PMU hardware/firmware version ACK frames
@@ -360,6 +362,10 @@ The driver registers an RTC device with alarm support. When an RTC alarm is set,
 On firmware profiles with unsupported RTC hardware, such as `RA2E1260306000`,
 `/dev/rtc0` remains registered but RTC reads report invalid data and alarm
 programming fails instead of writing a broken PMU schedule.
+Future `RA2E1*` firmware starts in `pending-probe`; the driver enables RTC and
+scheduled boot only after three consecutive valid, monotonic PMU RTC samples.
+Raw scheduled-boot commands sent through `/dev/pcat-pm-ctl` are gated by the
+same RTC capability state.
 
 This integrates with standard Linux RTC tools such as `rtcwake(8)`:
 

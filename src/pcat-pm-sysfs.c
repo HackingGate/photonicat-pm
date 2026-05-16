@@ -110,6 +110,19 @@ static ssize_t pmu_fw_version_show(struct kobject *kobj,
 	return scnprintf(buf, PAGE_SIZE, "%s\n", pm_data->pmu_fw_version);
 }
 
+static ssize_t pmu_rtc_capability_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	struct pcat_pm_data *pm_data;
+	enum pcat_pm_rtc_capability capability;
+
+	pm_data = container_of(kobj, struct pcat_pm_data, kobject);
+	capability = READ_ONCE(pm_data->pmu_fw_caps.rtc_capability);
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n",
+		pcat_pm_rtc_capability_name(capability));
+}
+
 static ssize_t power_on_event_show(struct kobject *kobj,
 	struct kobj_attribute *attr, char *buf)
 {
@@ -296,6 +309,9 @@ static struct kobj_attribute pcat_pm_sysfs_pmu_hw_version_attribute =
 static struct kobj_attribute pcat_pm_sysfs_pmu_fw_version_attribute =
 	__ATTR_RO(pmu_fw_version);
 
+static struct kobj_attribute pcat_pm_sysfs_pmu_rtc_capability_attribute =
+	__ATTR_RO(pmu_rtc_capability);
+
 static struct kobj_attribute pcat_pm_sysfs_power_on_event_attribute =
 	__ATTR_RO(power_on_event);
 
@@ -320,6 +336,7 @@ static struct attribute *pcat_pm_sysfs_attrs[] = {
 	&pcat_pm_sysfs_beeper_attribute.attr,
 	&pcat_pm_sysfs_pmu_hw_version_attribute.attr,
 	&pcat_pm_sysfs_pmu_fw_version_attribute.attr,
+	&pcat_pm_sysfs_pmu_rtc_capability_attribute.attr,
 	&pcat_pm_sysfs_power_on_event_attribute.attr,
 	&pcat_pm_sysfs_net_status_led_on_time_attribute.attr,
 	&pcat_pm_sysfs_net_status_led_off_time_attribute.attr,

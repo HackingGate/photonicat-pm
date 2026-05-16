@@ -18,6 +18,8 @@
 
 #include "photonicat-pm.h"
 
+#define PCAT_PM_RTC_PROBE_VALID_SAMPLES 3
+
 static const char *pcat_pm_fw_profile_name(enum pcat_pm_fw_profile profile)
 {
 	switch (profile) {
@@ -62,20 +64,55 @@ static struct pcat_pm_fw_caps pcat_pm_fw_caps_for_version(const char *version)
 {
 	struct pcat_pm_fw_caps caps = {
 		.profile = PCAT_PM_FW_PROFILE_LEGACY,
+		.rtc_capability = PCAT_PM_RTC_CAP_ENABLED_VERSION,
 		.pmu_energy_valid = false,
 	};
 
 	if (!strcmp(version, "RA2E1260306000")) {
 		caps.profile = PCAT_PM_FW_PROFILE_RA2E1260306000;
 		caps.battery_soc_stuck_100_quirk = true;
-		caps.rtc_broken = true;
+		caps.rtc_capability = PCAT_PM_RTC_CAP_DISABLED_DENYLIST;
 	} else if (!strcmp(version, "RA2E1250918000")) {
 		caps.profile = PCAT_PM_FW_PROFILE_RA2E1250918000;
 	} else if (pcat_pm_fw_version_is_future_ra2e1(version)) {
 		caps.profile = PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED;
+		caps.rtc_capability = PCAT_PM_RTC_CAP_PENDING_PROBE;
 	}
 
 	return caps;
+}
+
+static void pcat_pm_rtc_probe_update_locked(struct pcat_pm_data *pm_data,
+	struct rtc_time *rtc_time)
+{
+	time64_t sample_time;
+
+	if (pm_data->pmu_fw_caps.rtc_capability !=
+	    PCAT_PM_RTC_CAP_PENDING_PROBE)
+		return;
+
+	if (rtc_valid_tm(rtc_time)) {
+		pm_data->rtc_probe_valid_samples = 0;
+		return;
+	}
+
+	sample_time = rtc_tm_to_time64(rtc_time);
+	if (pm_data->rtc_probe_valid_samples > 0 &&
+	    sample_time < pm_data->rtc_probe_last_time) {
+		pm_data->rtc_probe_valid_samples = 1;
+	} else if (pm_data->rtc_probe_valid_samples <
+		   PCAT_PM_RTC_PROBE_VALID_SAMPLES) {
+		pm_data->rtc_probe_valid_samples++;
+	}
+	pm_data->rtc_probe_last_time = sample_time;
+
+	if (pm_data->rtc_probe_valid_samples >=
+	    PCAT_PM_RTC_PROBE_VALID_SAMPLES) {
+		pm_data->pmu_fw_caps.rtc_capability =
+			PCAT_PM_RTC_CAP_ENABLED_PROBE;
+		dev_info(&pm_data->serdev->dev,
+			"PMU RTC enabled after runtime validation.\n");
+	}
 }
 
 /**
@@ -273,6 +310,8 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	int gs_x = 0, gs_y = 0, gs_z = 0;
 	bool gs_ready = false;
 	u32 fan_rpm = 0;
+	struct rtc_time rtc_time = { 0 };
+	u16 rtc_year;
 
 	if (data_len < 16)
 		return;
@@ -286,6 +325,16 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 
 	(void)gpio_input;
 	(void)gpio_output;
+
+	/* Bytes 8-15: PMU RTC date/time */
+	rtc_year = data[8] + ((u16)data[9] << 8);
+	rtc_time.tm_year = rtc_year - 1900;
+	rtc_time.tm_mon = (int)data[10] - 1;
+	rtc_time.tm_mday = data[11];
+	rtc_time.tm_hour = data[12];
+	rtc_time.tm_min = data[13];
+	rtc_time.tm_sec = data[14];
+	rtc_time.tm_wday = data[15] % 7;
 
 	/* Bytes 17-19: Temperature and current (v2 protocol) */
 	if (data_len >= 20) {
@@ -352,13 +401,14 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	pm_data->battery_energy_full = pm_data->battery_design_uwh;
 	pm_data->on_battery = on_battery;
 	pm_data->on_charger = on_charger;
-	pm_data->rtc_year = data[8] + ((u16)data[9] << 8);
-	pm_data->rtc_month = data[10] - 1;
-	pm_data->rtc_day = data[11];
-	pm_data->rtc_hour = data[12];
-	pm_data->rtc_min = data[13];
-	pm_data->rtc_sec = data[14];
-	pm_data->rtc_wday = data[15] % 7;
+	pm_data->rtc_year = rtc_year;
+	pm_data->rtc_month = (u8)rtc_time.tm_mon;
+	pm_data->rtc_day = rtc_time.tm_mday;
+	pm_data->rtc_hour = rtc_time.tm_hour;
+	pm_data->rtc_min = rtc_time.tm_min;
+	pm_data->rtc_sec = rtc_time.tm_sec;
+	pm_data->rtc_wday = rtc_time.tm_wday;
+	pcat_pm_rtc_probe_update_locked(pm_data, &rtc_time);
 	pm_data->board_temp = temp;
 	pm_data->gs_x = gs_x;
 	pm_data->gs_y = gs_y;
@@ -540,13 +590,16 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 			memcpy(pm_data->pmu_fw_version, extra_data, copy_len);
 			pm_data->pmu_fw_version[copy_len] = '\0';
 			caps = pcat_pm_fw_caps_for_version(pm_data->pmu_fw_version);
+			pm_data->rtc_probe_valid_samples = 0;
+			pm_data->rtc_probe_last_time = 0;
 			pm_data->pmu_fw_caps = caps;
 			mutex_unlock(&pm_data->mutex);
 
 			dev_info(&pm_data->serdev->dev,
-				"PMU FW Version: %s (%s capabilities)\n",
+				"PMU FW Version: %s (%s capabilities, RTC %s)\n",
 				pm_data->pmu_fw_version,
-				pcat_pm_fw_profile_name(caps.profile));
+				pcat_pm_fw_profile_name(caps.profile),
+				pcat_pm_rtc_capability_name(caps.rtc_capability));
 		}
 		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 		break;

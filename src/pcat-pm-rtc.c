@@ -12,9 +12,10 @@
 
 #define PCAT_PM_RTC_ACK_TIMEOUT_MS 1000
 
-static bool pcat_pm_rtc_broken(struct pcat_pm_data *pm_data)
+static bool pcat_pm_rtc_enabled(struct pcat_pm_data *pm_data)
 {
-	return READ_ONCE(pm_data->pmu_fw_caps.rtc_broken);
+	return pcat_pm_rtc_capability_enabled(
+		READ_ONCE(pm_data->pmu_fw_caps.rtc_capability));
 }
 
 static void pcat_pm_rtc_ack_reset(struct pcat_pm_data *pm_data, bool *ack_seen,
@@ -47,11 +48,14 @@ static int pcat_pm_rtc_read_time(struct device *dev, struct rtc_time *t)
 	struct rtc_time rtc_time = { 0 };
 	unsigned int try_count;
 
-	if (pcat_pm_rtc_broken(pm_data))
+	if (!pcat_pm_rtc_enabled(pm_data))
 		return -EINVAL;
 
 	/* Wait up to 2 seconds for the first status report from PMU */
 	for (try_count = 0; try_count < 20; try_count++) {
+		if (!pcat_pm_rtc_enabled(pm_data))
+			return -EINVAL;
+
 		mutex_lock(&pm_data->mutex);
 		if (pm_data->rtc_year != 0) {
 			rtc_time.tm_year = pm_data->rtc_year - 1900;
@@ -64,6 +68,9 @@ static int pcat_pm_rtc_read_time(struct device *dev, struct rtc_time *t)
 			mutex_unlock(&pm_data->mutex);
 
 			if (rtc_valid_tm(&rtc_time))
+				return -EINVAL;
+
+			if (!pcat_pm_rtc_enabled(pm_data))
 				return -EINVAL;
 
 			*t = rtc_time;
@@ -85,7 +92,7 @@ static int pcat_pm_rtc_set_time(struct device *dev, struct rtc_time *t)
 	u16 frame_num;
 	int ret;
 
-	if (pcat_pm_rtc_broken(pm_data))
+	if (!pcat_pm_rtc_enabled(pm_data))
 		return -EOPNOTSUPP;
 
 	if (rtc_valid_tm(t))
@@ -101,6 +108,11 @@ static int pcat_pm_rtc_set_time(struct device *dev, struct rtc_time *t)
 	date_data[6] = t->tm_sec;
 
 	mutex_lock(&pm_data->rtc_cmd_mutex);
+	if (!pcat_pm_rtc_enabled(pm_data)) {
+		ret = -EOPNOTSUPP;
+		goto out_unlock;
+	}
+
 	pcat_pm_rtc_ack_reset(pm_data, &pm_data->rtc_sync_ack_seen,
 		&pm_data->rtc_sync_ack_frame, &pm_data->rtc_sync_ack_status);
 	ret = pcat_pm_uart_write_data_frame(pm_data, PCAT_PM_COMMAND_DATE_TIME_SYNC,
@@ -149,10 +161,15 @@ static int pcat_pm_schedule_boot_send(struct pcat_pm_data *pm_data)
 	u16 year;
 	int ret;
 
-	if (pcat_pm_rtc_broken(pm_data))
+	if (!pcat_pm_rtc_enabled(pm_data))
 		return -EOPNOTSUPP;
 
 	mutex_lock(&pm_data->rtc_cmd_mutex);
+	if (!pcat_pm_rtc_enabled(pm_data)) {
+		ret = -EOPNOTSUPP;
+		goto out_unlock;
+	}
+
 	mutex_lock(&pm_data->mutex);
 	already_sent = pm_data->schedule_boot_sent;
 	enabled = pm_data->alarm_enabled;
@@ -221,7 +238,7 @@ static int pcat_pm_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
 	struct pcat_pm_data *pm_data = pcat_pm_get_data_from_dev(dev);
 
-	if (pcat_pm_rtc_broken(pm_data))
+	if (!pcat_pm_rtc_enabled(pm_data))
 		return -EOPNOTSUPP;
 
 	mutex_lock(&pm_data->mutex);
@@ -237,7 +254,7 @@ static int pcat_pm_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
 	struct pcat_pm_data *pm_data = pcat_pm_get_data_from_dev(dev);
 
-	if (pcat_pm_rtc_broken(pm_data))
+	if (!pcat_pm_rtc_enabled(pm_data))
 		return -EOPNOTSUPP;
 
 	mutex_lock(&pm_data->mutex);
@@ -255,7 +272,7 @@ static int pcat_pm_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled
 {
 	struct pcat_pm_data *pm_data = pcat_pm_get_data_from_dev(dev);
 
-	if (pcat_pm_rtc_broken(pm_data))
+	if (!pcat_pm_rtc_enabled(pm_data))
 		return -EOPNOTSUPP;
 
 	mutex_lock(&pm_data->mutex);
@@ -276,7 +293,7 @@ static int pcat_pm_rtc_ioctl(struct device *dev, unsigned int cmd, unsigned long
 
 	switch (cmd) {
 	case RTC_VL_READ:
-		if (pcat_pm_rtc_broken(pm_data))
+		if (!pcat_pm_rtc_enabled(pm_data))
 			return put_user(RTC_VL_DATA_INVALID,
 				(unsigned int __user *)arg);
 
@@ -292,6 +309,8 @@ static int pcat_pm_rtc_ioctl(struct device *dev, unsigned int cmd, unsigned long
 		mutex_unlock(&pm_data->mutex);
 
 		if (!rtc_ready || rtc_valid_tm(&rtc_time))
+			flags |= RTC_VL_DATA_INVALID;
+		if (!pcat_pm_rtc_enabled(pm_data))
 			flags |= RTC_VL_DATA_INVALID;
 
 		return put_user(flags, (unsigned int __user *)arg);

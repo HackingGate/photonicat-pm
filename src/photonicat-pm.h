@@ -134,10 +134,41 @@ enum pcat_pm_fw_profile {
 	PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED,
 };
 
+enum pcat_pm_rtc_capability {
+	PCAT_PM_RTC_CAP_ENABLED_VERSION = 0,
+	PCAT_PM_RTC_CAP_DISABLED_DENYLIST,
+	PCAT_PM_RTC_CAP_PENDING_PROBE,
+	PCAT_PM_RTC_CAP_ENABLED_PROBE,
+};
+
+static inline bool pcat_pm_rtc_capability_enabled(
+	enum pcat_pm_rtc_capability capability)
+{
+	return capability == PCAT_PM_RTC_CAP_ENABLED_VERSION ||
+	       capability == PCAT_PM_RTC_CAP_ENABLED_PROBE;
+}
+
+static inline const char *pcat_pm_rtc_capability_name(
+	enum pcat_pm_rtc_capability capability)
+{
+	switch (capability) {
+	case PCAT_PM_RTC_CAP_ENABLED_VERSION:
+		return "enabled-version";
+	case PCAT_PM_RTC_CAP_DISABLED_DENYLIST:
+		return "disabled-denylist";
+	case PCAT_PM_RTC_CAP_PENDING_PROBE:
+		return "pending-probe";
+	case PCAT_PM_RTC_CAP_ENABLED_PROBE:
+		return "enabled-probe";
+	default:
+		return "unknown";
+	}
+}
+
 struct pcat_pm_fw_caps {
 	enum pcat_pm_fw_profile profile;
 	bool battery_soc_stuck_100_quirk;
-	bool rtc_broken;
+	enum pcat_pm_rtc_capability rtc_capability;
 	bool pmu_energy_valid;
 };
 
@@ -204,6 +235,8 @@ struct pcat_pm_fw_caps {
  * @rtc_min: RTC minute
  * @rtc_sec: RTC second
  * @rtc_wday: RTC day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+ * @rtc_probe_valid_samples: Consecutive valid PMU RTC samples for dynamic enable
+ * @rtc_probe_last_time: Last valid PMU RTC sample timestamp for monotonic probe
  * @fan_ctrl_speed: Fan control setting (0-100%)
  * @fan_managed: True once the driver has explicitly set fan speed
  * @movement_timestamp: Last movement detection time (ns)
@@ -303,6 +336,8 @@ struct pcat_pm_data {
 	u8 rtc_min;
 	u8 rtc_sec;
 	u8 rtc_wday;
+	u8 rtc_probe_valid_samples;
+	time64_t rtc_probe_last_time;
 	u16 rtc_sync_ack_frame;
 	u16 schedule_boot_ack_frame;
 	u8 rtc_sync_ack_status;
@@ -558,7 +593,8 @@ void pcat_pm_ctl_cmd_exec(struct pcat_pm_data *pm_data,
  *
  * Creates /sys/kernel/photonicat-pm/ with sysfs attributes for:
  * movement detection, status LED, beeper, PMU hardware/firmware version,
- * power-on event, network status LED, and charger auto-start.
+ * PMU RTC capability, power-on event, network status LED, and charger
+ * auto-start.
  *
  * Return: 0 on success, negative error otherwise
  */

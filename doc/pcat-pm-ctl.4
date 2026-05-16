@@ -33,10 +33,10 @@ validated.
 tab(|);
 l l.
 Firmware|Driver policy
-RA2E1250918000|Legacy SOC; RTC yes; energy ignored.
-RA2E1260306000|Stuck-100%; RTC off; energy ignored.
-Future RA2E1*|Baseline; energy/fan untrusted.
-Older/invalid|Legacy; no denylist quirks.
+RA2E1250918000|Legacy SOC; RTC enabled-version; energy ignored.
+RA2E1260306000|Stuck-100%; RTC disabled-denylist; energy ignored.
+Future RA2E1*|Baseline; RTC pending-probe until runtime validation; energy/fan untrusted.
+Older/invalid|Legacy; RTC enabled-version; no denylist quirks.
 .TE
 .PP
 For ABI stability,
@@ -77,6 +77,15 @@ On firmware profiles with unsupported RTC hardware, such as
 .BR RA2E1260306000 ,
 the device remains registered but RTC reads report invalid data and alarm
 programming fails instead of writing a broken PMU schedule.
+Future
+.B RA2E1*
+firmware starts in
+.BR pending-probe ;
+the driver enables RTC and scheduled boot only after three consecutive valid,
+monotonic PMU RTC samples.
+Raw scheduled-boot commands sent through
+.I /dev/pcat-pm-ctl
+are gated by the same RTC capability state.
 .SS Sensors & Fan
 .TP
 .B /sys/class/thermal/thermal_zone*/
@@ -150,6 +159,14 @@ which allows tools such as
 .BR pcat-pmu-updater
 .B --pmu-fw-version-get
 to read the response through the control device.
+.TP
+.B /sys/kernel/photonicat-pm/pmu_rtc_capability
+PMU RTC policy state (read-only). Values:
+.BR enabled-version ,
+.BR disabled-denylist ,
+.BR pending-probe ,
+or
+.BR enabled-probe .
 .TP
 .B /sys/kernel/photonicat-pm/power_on_event
 Last power-on event code (read-only). Values: 0 = unknown,
@@ -256,6 +273,9 @@ Turn off beeper:
 .TP
 Read PMU firmware version:
 .B cat /sys/kernel/photonicat-pm/pmu_fw_version
+.TP
+Read PMU RTC capability state:
+.B cat /sys/kernel/photonicat-pm/pmu_rtc_capability
 .TP
 Read power-on event:
 .B cat /sys/kernel/photonicat-pm/power_on_event
