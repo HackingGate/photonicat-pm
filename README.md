@@ -41,6 +41,10 @@ Observed RTC results are evidence for diagnostics, not feature gates:
 | `/sys/class/power_supply/battery/` | Battery status, capacity (0–100%), voltage, and current (read-only). |
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
+Battery capacity follows the vendor driver parser: PMU protocol v2 status
+reports expose PMU SOC directly, while shorter status reports use the
+device-tree OCV capacity table as fallback.
+
 > [!CAUTION]
 > PMU protocol v2 status-report energy values are not validated as live or
 > measured battery energy. The driver keeps `energy_full` as the static
@@ -234,6 +238,7 @@ battery: battery {
 ```bash
 cat /sys/class/power_supply/battery/capacity
 # 0-100 (battery capacity percentage)
+# v2 PMU status reports use PMU SOC directly; shorter reports use OCV fallback
 
 cat /sys/class/power_supply/battery/status
 # Charging or Discharging

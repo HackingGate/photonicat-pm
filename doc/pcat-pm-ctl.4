@@ -70,6 +70,10 @@ and scheduled boot stays blocked by runtime validation.
 .B /sys/class/power_supply/battery/
 Battery status, capacity (0\-100%), voltage, and current (read-only).
 .IP
+Battery capacity follows the vendor driver parser: PMU protocol v2 status
+reports expose PMU SOC directly, while shorter status reports use the
+device-tree OCV capacity table as fallback.
+.IP
 Current driver policy does not trust PMU protocol v2 status-report energy
 values as live or measured battery energy. This driver ignores PMU-reported
 energy values:
