@@ -5,6 +5,8 @@ photonicat-pm (1.0.3-1) unstable; urgency=medium
     PMU replies.
   * Serialize raw-control input separately from output delivery so PMU ACK
     frames remain readable by /dev/pcat-pm-ctl userspace consumers.
+  * Probe the PMU SOC stuck-100% workaround at runtime from repeated suspicious
+    status reports instead of tying it to a firmware version string.
   * Gate PMU behavior through runtime validation and keep /dev/rtc0 registered
     while RTC reads and scheduled boot stay disabled until valid, advancing PMU
     RTC samples are observed.

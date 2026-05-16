@@ -43,12 +43,11 @@ Observed firmware results are evidence for diagnostics, not feature gates:
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
 > [!CAUTION]
-> Known affected firmware: `RA2E1260306000`.
-> PMU SOC can stick at `100`, and PMU protocol v2 status-report energy values
-> are not validated as live or measured battery energy. The driver probes the
-> stuck-100% SOC workaround from status reports, ignores PMU-reported energy
-> values, keeps `energy_full` as the static device-tree design capacity, and
-> does not export `energy_now`.
+> Observed on tested firmware versions: PMU SOC can stick at `100`, and PMU
+> protocol v2 status-report energy values are not validated as live or measured
+> battery energy. The driver probes the stuck-100% SOC workaround from status
+> reports, ignores PMU-reported energy values, keeps `energy_full` as the static
+> device-tree design capacity, and does not export `energy_now`.
 
 ### Real-Time Clock & Scheduled Boot
 
