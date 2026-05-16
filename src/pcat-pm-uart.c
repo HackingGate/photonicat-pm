@@ -18,13 +18,13 @@
 
 #include "photonicat-pm.h"
 
+#define PCAT_PM_RA2E1_FW_VERSION_LEN 14
 #define PCAT_PM_RTC_PROBE_VALID_SAMPLES 3
+#define PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES 3
 
 static const char *pcat_pm_fw_profile_name(enum pcat_pm_fw_profile profile)
 {
 	switch (profile) {
-	case PCAT_PM_FW_PROFILE_RA2E1260306000:
-		return "ra2e1260306000-quirked";
 	case PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED:
 		return "ra2e1-unvalidated";
 	case PCAT_PM_FW_PROFILE_LEGACY:
@@ -39,7 +39,7 @@ static bool pcat_pm_fw_version_is_ra2e1(const char *version)
 
 	if (strncmp(version, "RA2E1", 5))
 		return false;
-	if (strlen(version) != strlen("RA2E1260306000"))
+	if (strlen(version) != PCAT_PM_RA2E1_FW_VERSION_LEN)
 		return false;
 
 	for (i = 5; version[i] != '\0'; i++) {
@@ -58,14 +58,44 @@ static struct pcat_pm_fw_caps pcat_pm_fw_caps_for_version(const char *version)
 		.pmu_energy_valid = false,
 	};
 
-	if (!strcmp(version, "RA2E1260306000")) {
-		caps.profile = PCAT_PM_FW_PROFILE_RA2E1260306000;
-		caps.battery_soc_stuck_100_quirk = true;
-	} else if (pcat_pm_fw_version_is_ra2e1(version)) {
+	if (pcat_pm_fw_version_is_ra2e1(version))
 		caps.profile = PCAT_PM_FW_PROFILE_RA2E1_UNVALIDATED;
-	}
 
 	return caps;
+}
+
+static bool pcat_pm_battery_soc_ignore_pmu_100(struct pcat_pm_data *pm_data,
+	int pmu_soc, int fallback_soc, bool fallback_soc_valid)
+{
+	bool suspicious, ignore;
+
+	suspicious = pmu_soc == 100 && fallback_soc_valid && fallback_soc < 100;
+
+	mutex_lock(&pm_data->mutex);
+	if (pmu_soc >= 0 && pmu_soc < 100) {
+		pm_data->battery_soc_stuck_100_probe_samples = 0;
+		pm_data->battery_soc_stuck_100_quirk = false;
+	} else if (suspicious) {
+		if (pm_data->battery_soc_stuck_100_probe_samples <
+		    PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES)
+			pm_data->battery_soc_stuck_100_probe_samples++;
+
+		if (!pm_data->battery_soc_stuck_100_quirk &&
+		    pm_data->battery_soc_stuck_100_probe_samples >=
+		    PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES) {
+			pm_data->battery_soc_stuck_100_quirk = true;
+			dev_info(&pm_data->serdev->dev,
+				"PMU battery SOC stuck-100%% quirk enabled after runtime validation.\n");
+		}
+	} else {
+		pm_data->battery_soc_stuck_100_probe_samples = 0;
+	}
+	ignore = suspicious &&
+		(pm_data->battery_soc_stuck_100_probe_samples > 0 ||
+		 pm_data->battery_soc_stuck_100_quirk);
+	mutex_unlock(&pm_data->mutex);
+
+	return ignore;
 }
 
 static void pcat_pm_rtc_probe_update_locked(struct pcat_pm_data *pm_data,
@@ -292,6 +322,7 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	bool prev_on_battery, prev_on_charger;
 	bool notify_power_supply = false;
 	int soc = 0, ocv_soc = -EINVAL, pmu_soc = -EINVAL;
+	bool fallback_soc_valid = false;
 	bool charging = false;
 	int gs_x = 0, gs_y = 0, gs_z = 0;
 	bool gs_ready = false;
@@ -345,20 +376,23 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 		ocv_soc = power_supply_batinfo_ocv2cap(
 			pm_data->battery_info, (int)battery_voltage * 1000, 20);
 		soc = ocv_soc;
+		fallback_soc_valid = soc >= 0 && soc <= 100;
 	}
 
 	/*
 	 * OCV overestimates SOC while the pack is being actively charged. Use a
 	 * charging-voltage curve here, then treat PMU SOC as advisory.
 	 */
-	if (charging)
+	if (charging) {
 		soc = pcat_pm_charge_voltage_to_soc(battery_voltage);
+		fallback_soc_valid = true;
+	}
 
 	if (data_len >= 31) {
 		pmu_soc = data[22];
-		if (pmu_soc <= 100 &&
-		    !(READ_ONCE(pm_data->pmu_fw_caps.battery_soc_stuck_100_quirk) &&
-		      pmu_soc == 100 && soc < 100))
+		if (!pcat_pm_battery_soc_ignore_pmu_100(pm_data, pmu_soc,
+				soc, fallback_soc_valid) &&
+		    pmu_soc <= 100)
 			soc = pmu_soc;
 	}
 

@@ -25,18 +25,18 @@ See
 .I photonicat-pm.h
 for the protocol frame format and command definitions.
 .SS MCU Firmware Capability Policy
-The driver selects non-RTC capability quirks when the PMU firmware version
-acknowledgment is received. RTC and scheduled boot do not trust firmware
-version strings: every firmware starts with RTC disabled as
+The driver avoids enabling fragile PMU behavior solely from firmware version
+strings. RTC and scheduled boot start disabled as
 .BR pending-probe
-and must pass runtime validation before RTC operations are enabled.
+and must pass runtime validation before RTC operations are enabled. The PMU SOC
+stuck-100% workaround is also runtime-detected from status reports instead of
+tied to a known firmware version.
 .TS
 tab(|);
 l l.
 Firmware|Driver policy
-RA2E1260306000|Stuck-100%; RTC pending-probe until runtime validation; energy ignored.
-Other RA2E1*|Baseline; RTC pending-probe until runtime validation; energy/fan untrusted.
-Older/invalid|Legacy; RTC pending-probe until runtime validation; no stuck-100% quirk.
+RA2E1*|PMU SOC accepted when plausible; stuck-100% probed from status reports; RTC pending-probe until runtime validation; energy/fan untrusted.
+Older/invalid|Legacy; stuck-100% probed from status reports; RTC pending-probe until runtime validation.
 .TE
 .PP
 For ABI stability,

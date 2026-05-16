@@ -9,16 +9,16 @@ for MCU firmware inspection and flashing workflows.
 
 ## MCU Firmware Capability Policy
 
-The driver selects non-RTC capability quirks when the PMU firmware version ACK
-is received. RTC and scheduled boot do not trust firmware version strings:
-every firmware starts with RTC disabled as `pending-probe` and must pass runtime
-validation before RTC operations are enabled.
+The driver avoids enabling fragile PMU behavior solely from firmware version
+strings. RTC and scheduled boot start disabled as `pending-probe` and must pass
+runtime validation before RTC operations are enabled. The PMU SOC stuck-100%
+workaround is also runtime-detected from status reports instead of tied to a
+known firmware version.
 
 | Firmware version | Battery capacity policy | RTC / scheduled boot policy | Energy and fan policy |
 |------------------|-------------------------|-----------------------------|-----------------------|
-| `RA2E1260306000` | Stuck-100% quirk enabled; PMU SOC `100` is ignored when fallback SOC is below 100. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, monotonic PMU RTC samples promote it to `enabled-probe`. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
-| Other `RA2E1*` | Runtime-gated baseline; existing version-independent status fields remain enabled, with no stuck-100% quirk. | Starts as `pending-probe`; RTC is enabled only after the same runtime validation. | PMU energy fields and fan auto-speed reset are not trusted until validated. |
-| Older or unparseable | Legacy behavior is preserved; no `RA2E1260306000` quirks are applied. | Starts as `pending-probe`; RTC is enabled only after the same runtime validation. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
+| `RA2E1*` | PMU SOC is accepted when plausible. If status reports repeatedly show PMU SOC `100` while voltage-derived fallback SOC is below 100, the driver uses fallback SOC and enables the stuck-100% workaround after three consecutive mismatches. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, monotonic PMU RTC samples promote it to `enabled-probe`. | PMU energy fields and fan auto-speed reset are not trusted until validated. |
+| Older or unparseable | Legacy version-independent behavior is preserved with the same runtime stuck-100% SOC probe. | Starts as `pending-probe`; RTC is enabled only after the same runtime validation. | PMU energy fields are ignored; fan auto-speed reset remains untrusted. |
 
 ## Features
 
