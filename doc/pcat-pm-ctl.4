@@ -43,9 +43,13 @@ to
 .B Battery capacity
 Starts by accepting plausible PMU SOC. If status reports repeatedly show PMU SOC
 .B 100
-while the voltage-derived fallback SOC is below 100, the driver treats that as a
-failed SOC probe, uses fallback SOC, and enables the stuck-100% workaround after
-three consecutive suspicious samples.
+while the voltage-derived fallback SOC is below 100, the driver treats the PMU
+SOC stream as unreliable, uses fallback SOC, and enables the stuck-100%
+workaround after three consecutive suspicious samples. Current validation only
+shows that this runtime guard can enable on the tested
+.B NT2421A3
+PMU hardware; it does not prove that a specific MCU firmware or hardware
+revision reports bad SOC.
 .TP
 .B Energy and fan
 PMU protocol v2 energy fields and fan auto-speed reset are not trusted by
@@ -56,23 +60,26 @@ remains the static device-tree design capacity,
 is not exported, and fan auto-speed restoration requires the documented
 workarounds.
 .PP
-Observed firmware results are evidence for diagnostics, not feature gates:
+Observed RTC results are evidence for diagnostics, not feature gates:
 .TP
 .B RA2E1250918000
 RTC promotes to
 .BR enabled-probe
-and scheduled boot works; the stuck-100% workaround is enabled after runtime
-validation.
+and scheduled boot works.
 .TP
 .B RA2E1260306000
 RTC remains
 .BR pending-probe
-and scheduled boot stays blocked by runtime validation; the stuck-100%
-workaround is enabled after runtime validation.
+and scheduled boot stays blocked by runtime validation.
 .SS Power Supply
 .TP
 .B /sys/class/power_supply/battery/
 Battery status, capacity (0\-100%), voltage, and current (read-only).
+.IP
+PMU SOC is treated as advisory until runtime validation accepts it. The driver
+probes the stuck-100% SOC workaround from status reports, but current validation
+did not capture raw PMU and fallback SOC samples, so it does not prove a
+specific MCU firmware or hardware revision reports bad SOC.
 .IP
 Current driver policy does not trust PMU protocol v2 status-report energy
 values as live or measured battery energy. This driver ignores PMU-reported
