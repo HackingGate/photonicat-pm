@@ -41,15 +41,9 @@ to
 .BR enabled-probe .
 .TP
 .B Battery capacity
-Starts by accepting plausible PMU SOC. If status reports repeatedly show PMU SOC
-.B 100
-while the voltage-derived fallback SOC is below 100, the driver treats the PMU
-SOC stream as unreliable, uses fallback SOC, and enables the stuck-100%
-workaround after three consecutive suspicious samples. Current validation only
-shows that this runtime guard can enable on the tested
-.B NT2421A3
-PMU hardware; it does not prove that a specific MCU firmware or hardware
-revision reports bad SOC.
+Follows the vendor driver policy. PMU protocol v2 status reports use the
+PMU-reported SOC byte directly. Shorter status reports fall back to
+voltage-derived OCV SOC from the device-tree battery profile.
 .TP
 .B Energy and fan
 PMU protocol v2 energy fields and fan auto-speed reset are not trusted by
@@ -75,11 +69,6 @@ and scheduled boot stays blocked by runtime validation.
 .TP
 .B /sys/class/power_supply/battery/
 Battery status, capacity (0\-100%), voltage, and current (read-only).
-.IP
-PMU SOC is treated as advisory until runtime validation accepts it. The driver
-probes the stuck-100% SOC workaround from status reports, but current validation
-did not capture raw PMU and fallback SOC samples, so it does not prove a
-specific MCU firmware or hardware revision reports bad SOC.
 .IP
 Current driver policy does not trust PMU protocol v2 status-report energy
 values as live or measured battery energy. This driver ignores PMU-reported

@@ -17,13 +17,9 @@ detection, not as a static firmware-version allowlist or denylist.
   scheduled-boot commands are blocked until the PMU reports three consecutive
   valid, advancing RTC samples. Passing that probe promotes
   `pmu_rtc_capability` to `enabled-probe`.
-- **Battery capacity**: starts by accepting plausible PMU SOC. If status reports
-  repeatedly show PMU SOC `100` while the voltage-derived fallback SOC is below
-  100, the driver treats the PMU SOC stream as unreliable, uses fallback SOC,
-  and enables the stuck-100% workaround after three consecutive suspicious
-  samples. Current validation only shows that this runtime guard can enable on
-  the tested `NT2421A3` PMU hardware; it does not prove that a specific MCU
-  firmware or hardware revision reports bad SOC.
+- **Battery capacity**: follows the vendor driver policy. PMU protocol v2
+  status reports use the PMU-reported SOC byte directly. Shorter status reports
+  fall back to voltage-derived OCV SOC from the device-tree battery profile.
 - **Energy and fan**: PMU protocol v2 energy fields and fan auto-speed reset are
   not trusted by current driver releases. `energy_full` remains the static
   device-tree design capacity, `energy_now` is not exported, and fan auto-speed
@@ -46,13 +42,9 @@ Observed RTC results are evidence for diagnostics, not feature gates:
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
 > [!CAUTION]
-> PMU SOC is treated as advisory until runtime validation accepts it. The driver
-> probes the stuck-100% SOC workaround from status reports, but current
-> validation did not capture raw PMU and fallback SOC samples, so it does not
-> prove a specific MCU firmware or hardware revision reports bad SOC. PMU
-> protocol v2 status-report energy values are not validated as live or measured
-> battery energy; the driver keeps `energy_full` as the static device-tree
-> design capacity and does not export `energy_now`.
+> PMU protocol v2 status-report energy values are not validated as live or
+> measured battery energy. The driver keeps `energy_full` as the static
+> device-tree design capacity and does not export `energy_now`.
 
 ### Real-Time Clock & Scheduled Boot
 
