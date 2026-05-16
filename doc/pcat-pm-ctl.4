@@ -75,7 +75,7 @@ work through this interface.
 All firmware starts in
 .BR pending-probe ;
 the device remains registered, but RTC reads report invalid data and alarm
-programming fails until the driver observes three consecutive valid, monotonic
+programming fails until the driver observes three consecutive valid, advancing
 PMU RTC samples and promotes the capability to
 .BR enabled-probe .
 No firmware version string enables RTC or scheduled boot by itself.

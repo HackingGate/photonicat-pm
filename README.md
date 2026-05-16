@@ -17,7 +17,7 @@ known firmware version.
 
 | Firmware version | Battery capacity policy | RTC / scheduled boot policy | Energy and fan policy |
 |------------------|-------------------------|-----------------------------|-----------------------|
-| All firmware | PMU SOC is accepted when plausible. If status reports repeatedly show PMU SOC `100` while voltage-derived fallback SOC is below 100, the driver uses fallback SOC and enables the stuck-100% workaround after three consecutive mismatches. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, monotonic PMU RTC samples promote it to `enabled-probe`. | PMU energy fields and fan auto-speed reset are not trusted by current driver releases. |
+| All firmware | PMU SOC is accepted when plausible. If status reports repeatedly show PMU SOC `100` while voltage-derived fallback SOC is below 100, the driver uses fallback SOC and enables the stuck-100% workaround after three consecutive mismatches. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, advancing PMU RTC samples promote it to `enabled-probe`. | PMU energy fields and fan auto-speed reset are not trusted by current driver releases. |
 
 ## Features
 
@@ -377,7 +377,7 @@ cat /sys/kernel/photonicat-pm/power_on_event
 The driver registers an RTC device with alarm support. When an RTC alarm is set, the driver sends the alarm time to the PMU via UART (`SCHEDULE_STARTUP_TIME_SET`). The PMU stores this schedule and will power on the board at the specified time, even when the system is fully powered off. The alarm is one-shot (non-recurring).
 All firmware starts in `pending-probe`; `/dev/rtc0` remains registered, but RTC
 reads report invalid data and alarm programming fails until the driver observes
-three consecutive valid, monotonic PMU RTC samples and promotes the capability
+three consecutive valid, advancing PMU RTC samples and promotes the capability
 to `enabled-probe`. No firmware version string enables RTC or scheduled boot by
 itself.
 Raw scheduled-boot commands sent through `/dev/pcat-pm-ctl` are gated by the

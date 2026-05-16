@@ -66,14 +66,17 @@ static void pcat_pm_rtc_probe_update_locked(struct pcat_pm_data *pm_data,
 
 	if (rtc_valid_tm(rtc_time)) {
 		pm_data->rtc_probe_valid_samples = 0;
+		pm_data->rtc_probe_last_time = 0;
 		return;
 	}
 
 	sample_time = rtc_tm_to_time64(rtc_time);
-	if (pm_data->rtc_probe_valid_samples > 0 &&
-	    sample_time < pm_data->rtc_probe_last_time) {
+	if (pm_data->rtc_probe_valid_samples == 0) {
 		pm_data->rtc_probe_valid_samples = 1;
-	} else if (pm_data->rtc_probe_valid_samples <
+	} else if (sample_time < pm_data->rtc_probe_last_time) {
+		pm_data->rtc_probe_valid_samples = 1;
+	} else if (sample_time > pm_data->rtc_probe_last_time &&
+		   pm_data->rtc_probe_valid_samples <
 		   PCAT_PM_RTC_PROBE_VALID_SAMPLES) {
 		pm_data->rtc_probe_valid_samples++;
 	}
