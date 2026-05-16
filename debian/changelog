@@ -15,7 +15,7 @@ photonicat-pm (1.0.3-1) unstable; urgency=medium
   * Document the PMU firmware capability policy without using version strings as
     feature gates.
 
- -- HackingGate <i@hackinggate.com>  Sat, 16 May 2026 00:48:11 +0900
+ -- HackingGate <i@hackinggate.com>  Sun, 17 May 2026 01:01:35 +0900
 
 photonicat-pm (1.0.2-1) unstable; urgency=medium
 
