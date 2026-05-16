@@ -351,5 +351,7 @@ int pcat_pm_rtc_probe(struct pcat_pm_data *pm_data)
 		return ret;
 	}
 
+	device_init_wakeup(&pm_data->serdev->dev, true);
+
 	return 0;
 }

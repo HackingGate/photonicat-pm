@@ -33,6 +33,7 @@
 #include <linux/hrtimer.h>
 #include <linux/property.h>
 #include <linux/serdev.h>
+#include <linux/pm_wakeup.h>
 #include <linux/reboot.h>
 #include <linux/power_supply.h>
 #include <linux/rtc.h>
