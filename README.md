@@ -7,6 +7,31 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 See the [Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki)
 for MCU firmware inspection and flashing workflows.
 
+## MCU Firmware Capability Policy
+
+The driver treats firmware behavior as runtime-observed capability or quirk
+detection, not as a static firmware-version allowlist or denylist.
+
+- **RTC and scheduled boot**: start as `pending-probe`. `/dev/rtc0` remains
+  registered for ABI stability, but RTC reads, set-time, alarms, and raw
+  scheduled-boot commands are blocked until the PMU reports three consecutive
+  valid, advancing RTC samples. Passing that probe promotes
+  `pmu_rtc_capability` to `enabled-probe`.
+- **Battery capacity**: follows the vendor driver policy. PMU protocol v2
+  status reports use the PMU-reported SOC byte directly. Shorter status reports
+  fall back to voltage-derived OCV SOC from the device-tree battery profile.
+- **Energy and fan**: PMU protocol v2 energy fields and fan auto-speed reset are
+  not trusted by current driver releases. `energy_full` remains the static
+  device-tree design capacity, `energy_now` is not exported, and fan auto-speed
+  restoration requires the documented workarounds.
+
+Observed RTC results are evidence for diagnostics, not feature gates:
+
+| Firmware version | Observed RTC result |
+|------------------|---------------------|
+| `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. |
+| `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
+
 ## Features
 
 ### Power Supply
@@ -16,8 +41,14 @@ for MCU firmware inspection and flashing workflows.
 | `/sys/class/power_supply/battery/` | Battery status, capacity (0–100%), voltage, and current (read-only). |
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
+Battery capacity follows the vendor driver parser: PMU protocol v2 status
+reports expose PMU SOC directly, while shorter status reports use the
+device-tree OCV capacity table as fallback.
+
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, PMU protocol v2 status-report energy values are not validated as live or measured battery energy. This driver ignores PMU-reported energy values: `energy_full` is the static `energy-full-design-microwatt-hours` value from the `simple-battery` device-tree node, not PMU-measured full capacity; `energy_now` is not exported by current releases.
+> PMU protocol v2 status-report energy values are not validated as live or
+> measured battery energy. The driver keeps `energy_full` as the static
+> device-tree design capacity and does not export `energy_now`.
 
 ### Real-Time Clock & Scheduled Boot
 
@@ -26,7 +57,10 @@ for MCU firmware inspection and flashing workflows.
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
 
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, the hardware RTC is broken. Do not rely on `/dev/rtc0`, RTC alarms, or scheduled boot via `rtcwake(8)` until the MCU firmware is fixed.
+> Known affected firmware: `RA2E1260306000`.
+> The hardware RTC reports broken values. `/dev/rtc0` remains registered for
+> ABI stability, but RTC reads report invalid data and alarm programming fails
+> until runtime validation promotes `pmu_rtc_capability` to `enabled-probe`.
 
 ### Sensors & Fan
 
@@ -55,6 +89,7 @@ for MCU firmware inspection and flashing workflows.
 |-----------|-------------|
 | `/sys/kernel/photonicat-pm/pmu_hw_version` | PMU hardware version string (read-only). Queried from PMU on driver load. |
 | `/sys/kernel/photonicat-pm/pmu_fw_version` | PMU firmware version string (read-only). Queried from PMU on driver load. |
+| `/sys/kernel/photonicat-pm/pmu_rtc_capability` | PMU RTC policy state (read-only). Values: `pending-probe` or `enabled-probe`. |
 | `/sys/kernel/photonicat-pm/power_on_event` | Last power-on event code (read-only). Values: 0 = unknown, 1 = power button, 2 = scheduled, 3 = charger connected, 4 = USB. |
 
 ### Configuration
@@ -66,7 +101,7 @@ for MCU firmware inspection and flashing workflows.
 
 | Interface | Description |
 |-----------|-------------|
-| `/dev/pcat-pm-ctl` | Raw PMU command interface. See `pcat-pm-ctl(4)` man page for frame format and details. |
+| `/dev/pcat-pm-ctl` | Raw PMU command interface. Userspace can read selected raw PMU responses, including hardware/firmware version ACKs used by `pcat-pmu-updater --pmu-fw-version-get`. See `pcat-pm-ctl(4)` man page for frame format and details. |
 
 ## Building
 
@@ -203,6 +238,7 @@ battery: battery {
 ```bash
 cat /sys/class/power_supply/battery/capacity
 # 0-100 (battery capacity percentage)
+# v2 PMU status reports use PMU SOC directly; shorter reports use OCV fallback
 
 cat /sys/class/power_supply/battery/status
 # Charging or Discharging
@@ -231,9 +267,12 @@ However, when the system shuts down, the software stops and the PMU retains the
 last SET value.
 
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, the MCU exposes no API to reset fan control back to PMU auto speed. The steps below are workarounds to restore PMU auto speed.
+> Known affected firmware: all tested firmware versions up to and including
+> `RA2E1260306000`.
+> No trusted API is exposed to reset fan control back to PMU auto speed. The
+> steps below are workarounds to restore PMU auto speed.
 >
-> Due to that MCU limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
+> Due to that firmware limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
 >
 > When in managed fan speed, after shutdown, the fan stays at the last fixed speed and will not adjust on its own. If the retained speed is low and the device is still charging or otherwise thermally active, this can be unsafe for thermal management.
 >
@@ -333,7 +372,13 @@ cat /sys/kernel/photonicat-pm/beeper
 ```bash
 cat /sys/kernel/photonicat-pm/pmu_hw_version
 cat /sys/kernel/photonicat-pm/pmu_fw_version
+cat /sys/kernel/photonicat-pm/pmu_rtc_capability
 ```
+
+The driver also forwards the raw PMU hardware/firmware version ACK frames
+to `/dev/pcat-pm-ctl` for tools that query the PMU through the control
+device. The sysfs attributes above are still updated internally by the
+driver.
 
 ### Power-on Event
 
@@ -345,6 +390,13 @@ cat /sys/kernel/photonicat-pm/power_on_event
 ### Schedule Boot
 
 The driver registers an RTC device with alarm support. When an RTC alarm is set, the driver sends the alarm time to the PMU via UART (`SCHEDULE_STARTUP_TIME_SET`). The PMU stores this schedule and will power on the board at the specified time, even when the system is fully powered off. The alarm is one-shot (non-recurring).
+All firmware starts in `pending-probe`; `/dev/rtc0` remains registered, but RTC
+reads report invalid data and alarm programming fails until the driver observes
+three consecutive valid, advancing PMU RTC samples and promotes the capability
+to `enabled-probe`. No firmware version string enables RTC or scheduled boot by
+itself.
+Raw scheduled-boot commands sent through `/dev/pcat-pm-ctl` are gated by the
+same RTC capability state.
 
 This integrates with standard Linux RTC tools such as `rtcwake(8)`:
 
@@ -395,6 +447,9 @@ cat /sys/kernel/photonicat-pm/charger_on_auto_start
 ### Control Device (`/dev/pcat-pm-ctl`)
 
 Raw escape hatch for advanced PMU commands using the binary serial protocol.
+Userspace can read selected raw PMU responses from this device, including
+the PMU hardware/firmware version ACK frames used by
+`pcat-pmu-updater --pmu-fw-version-get`.
 See `pcat-pm-ctl(4)` man page for frame format and details.
 
 ## Protocol

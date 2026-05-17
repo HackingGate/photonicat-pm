@@ -192,6 +192,7 @@ static int pcat_pm_probe(struct serdev_device *serdev)
 	mutex_init(&pm_data->mutex);
 	mutex_init(&pm_data->rtc_cmd_mutex);
 	mutex_init(&pm_data->ctl_mutex);
+	mutex_init(&pm_data->ctl_read_mutex);
 	init_waitqueue_head(&pm_data->ctl_wait);
 	init_waitqueue_head(&pm_data->rtc_cmd_wait);
 
@@ -356,6 +357,7 @@ static void pcat_pm_remove(struct serdev_device *serdev)
 	if (!IS_ERR(pm_data->kworker))
 		kthread_destroy_worker(pm_data->kworker);
 
+	device_init_wakeup(&serdev->dev, false);
 	misc_deregister(&pm_data->ctl_device);
 	pcat_pm_charger_remove(pm_data);
 	pcat_pm_sysfs_cleanup(pm_data);

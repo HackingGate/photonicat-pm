@@ -18,6 +18,44 @@
 
 #include "photonicat-pm.h"
 
+#define PCAT_PM_RTC_PROBE_VALID_SAMPLES 3
+
+static void pcat_pm_rtc_probe_update_locked(struct pcat_pm_data *pm_data,
+	struct rtc_time *rtc_time)
+{
+	time64_t sample_time;
+
+	if (pm_data->pmu_fw_caps.rtc_capability !=
+	    PCAT_PM_RTC_CAP_PENDING_PROBE)
+		return;
+
+	if (rtc_valid_tm(rtc_time)) {
+		pm_data->rtc_probe_valid_samples = 0;
+		pm_data->rtc_probe_last_time = 0;
+		return;
+	}
+
+	sample_time = rtc_tm_to_time64(rtc_time);
+	if (pm_data->rtc_probe_valid_samples == 0) {
+		pm_data->rtc_probe_valid_samples = 1;
+	} else if (sample_time < pm_data->rtc_probe_last_time) {
+		pm_data->rtc_probe_valid_samples = 1;
+	} else if (sample_time > pm_data->rtc_probe_last_time &&
+		   pm_data->rtc_probe_valid_samples <
+		   PCAT_PM_RTC_PROBE_VALID_SAMPLES) {
+		pm_data->rtc_probe_valid_samples++;
+	}
+	pm_data->rtc_probe_last_time = sample_time;
+
+	if (pm_data->rtc_probe_valid_samples >=
+	    PCAT_PM_RTC_PROBE_VALID_SAMPLES) {
+		pm_data->pmu_fw_caps.rtc_capability =
+			PCAT_PM_RTC_CAP_ENABLED_PROBE;
+		dev_info(&pm_data->serdev->dev,
+			"PMU RTC enabled after runtime validation.\n");
+	}
+}
+
 /**
  * pcat_pm_compute_crc16 - Compute Modbus CRC16 checksum
  * @data: Input data buffer
@@ -44,37 +82,6 @@ u16 pcat_pm_compute_crc16(const u8 *data, size_t len)
 	}
 
 	return crc;
-}
-
-static int pcat_pm_charge_voltage_to_soc(u16 battery_voltage)
-{
-	static const struct {
-		u16 voltage;
-		int capacity;
-	} charge_curve[] = {
-		{ 8400, 100 }, { 8300, 90 }, { 8200, 80 }, { 8100, 70 },
-		{ 8000, 60 }, { 7900, 50 }, { 7800, 40 }, { 7700, 30 },
-		{ 7600, 20 }, { 7500, 10 }, { 7400, 0 },
-	};
-	int i;
-
-	if (battery_voltage >= charge_curve[0].voltage)
-		return charge_curve[0].capacity;
-
-	for (i = 1; i < ARRAY_SIZE(charge_curve); i++) {
-		const u16 high_voltage = charge_curve[i - 1].voltage;
-		const u16 low_voltage = charge_curve[i].voltage;
-		const int high_capacity = charge_curve[i - 1].capacity;
-		const int low_capacity = charge_curve[i].capacity;
-
-		if (battery_voltage >= low_voltage) {
-			return low_capacity + (battery_voltage - low_voltage) *
-				(high_capacity - low_capacity) /
-				(high_voltage - low_voltage);
-		}
-	}
-
-	return charge_curve[ARRAY_SIZE(charge_curve) - 1].capacity;
 }
 
 static void pcat_pm_record_rtc_ack(struct pcat_pm_data *pm_data, bool *ack_seen,
@@ -208,11 +215,12 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	bool on_battery, on_charger;
 	bool prev_on_battery, prev_on_charger;
 	bool notify_power_supply = false;
-	int soc = 0, ocv_soc = -EINVAL, pmu_soc = -EINVAL;
-	bool charging = false;
+	int soc = 0;
 	int gs_x = 0, gs_y = 0, gs_z = 0;
 	bool gs_ready = false;
 	u32 fan_rpm = 0;
+	struct rtc_time rtc_time = { 0 };
+	u16 rtc_year;
 
 	if (data_len < 16)
 		return;
@@ -227,12 +235,21 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	(void)gpio_input;
 	(void)gpio_output;
 
+	/* Bytes 8-15: PMU RTC date/time */
+	rtc_year = data[8] + ((u16)data[9] << 8);
+	rtc_time.tm_year = rtc_year - 1900;
+	rtc_time.tm_mon = (int)data[10] - 1;
+	rtc_time.tm_mday = data[11];
+	rtc_time.tm_hour = data[12];
+	rtc_time.tm_min = data[13];
+	rtc_time.tm_sec = data[14];
+	rtc_time.tm_wday = data[15] % 7;
+
 	/* Bytes 17-19: Temperature and current (v2 protocol) */
 	if (data_len >= 20) {
 		temp = (int)data[17] - 100;
 		battery_current_raw = data[18] + ((u16)data[19] << 8);
 		battery_current = (s16)battery_current_raw;
-		charging = (battery_current < -50);
 		/*
 		 * PMU raw current sign: positive = discharging (out of battery),
 		 * negative = charging (into battery).
@@ -246,26 +263,11 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 		on_battery = !on_charger;
 	}
 
-	if (pm_data->battery_info) {
-		ocv_soc = power_supply_batinfo_ocv2cap(
+	if (data_len >= 31)
+		soc = data[22];
+	else if (pm_data->battery_info)
+		soc = power_supply_batinfo_ocv2cap(
 			pm_data->battery_info, (int)battery_voltage * 1000, 20);
-		soc = ocv_soc;
-	}
-
-	/*
-	 * OCV overestimates SOC while the pack is being actively charged. Use a
-	 * charging-voltage curve here, then treat PMU SOC as advisory.
-	 */
-	if (charging)
-		soc = pcat_pm_charge_voltage_to_soc(battery_voltage);
-
-	if (data_len >= 31) {
-		pmu_soc = data[22];
-		if (pmu_soc <= 100 &&
-		    !(READ_ONCE(pm_data->battery_soc_stuck_100_quirk) &&
-		      pmu_soc == 100 && soc < 100))
-			soc = pmu_soc;
-	}
 
 	/* Bytes 35-51: Accelerometer and fan speed */
 	if (data_len >= 52) {
@@ -292,13 +294,14 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	pm_data->battery_energy_full = pm_data->battery_design_uwh;
 	pm_data->on_battery = on_battery;
 	pm_data->on_charger = on_charger;
-	pm_data->rtc_year = data[8] + ((u16)data[9] << 8);
-	pm_data->rtc_month = data[10] - 1;
-	pm_data->rtc_day = data[11];
-	pm_data->rtc_hour = data[12];
-	pm_data->rtc_min = data[13];
-	pm_data->rtc_sec = data[14];
-	pm_data->rtc_wday = data[15] % 7;
+	pm_data->rtc_year = rtc_year;
+	pm_data->rtc_month = (u8)rtc_time.tm_mon;
+	pm_data->rtc_day = rtc_time.tm_mday;
+	pm_data->rtc_hour = rtc_time.tm_hour;
+	pm_data->rtc_min = rtc_time.tm_min;
+	pm_data->rtc_sec = rtc_time.tm_sec;
+	pm_data->rtc_wday = rtc_time.tm_wday;
+	pcat_pm_rtc_probe_update_locked(pm_data, &rtc_time);
 	pm_data->board_temp = temp;
 	pm_data->gs_x = gs_x;
 	pm_data->gs_y = gs_y;
@@ -322,6 +325,48 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 }
 
 /**
+ * pcat_pm_ctl_forward_raw - Forward a raw PMU frame to the control device
+ * @pm_data: Driver data
+ * @rawdata: Raw packet data
+ * @rawdata_len: Packet length
+ */
+static void pcat_pm_ctl_forward_raw(struct pcat_pm_data *pm_data,
+	const u8 *rawdata, size_t rawdata_len)
+{
+	size_t copy_len;
+	size_t overflow_size;
+	const u8 *copy_from;
+
+	if (!rawdata || rawdata_len == 0)
+		return;
+
+	copy_len = min_t(size_t, rawdata_len, PCAT_PM_BUFFER_SIZE);
+	copy_from = rawdata + rawdata_len - copy_len;
+
+	mutex_lock(&pm_data->ctl_mutex);
+	if (copy_len == PCAT_PM_BUFFER_SIZE) {
+		memcpy(pm_data->ctl_write_buffer, copy_from, copy_len);
+		pm_data->ctl_write_buffer_used = copy_len;
+	} else {
+		if (pm_data->ctl_write_buffer_used + copy_len > PCAT_PM_BUFFER_SIZE) {
+			overflow_size = pm_data->ctl_write_buffer_used + copy_len -
+				PCAT_PM_BUFFER_SIZE;
+			memmove(pm_data->ctl_write_buffer,
+				pm_data->ctl_write_buffer + overflow_size,
+				pm_data->ctl_write_buffer_used - overflow_size);
+			pm_data->ctl_write_buffer_used -= overflow_size;
+		}
+
+		memcpy(pm_data->ctl_write_buffer + pm_data->ctl_write_buffer_used,
+			copy_from, copy_len);
+		pm_data->ctl_write_buffer_used += copy_len;
+	}
+	WRITE_ONCE(pm_data->ctl_write_buffer_ready, true);
+	mutex_unlock(&pm_data->ctl_mutex);
+	wake_up_interruptible_all(&pm_data->ctl_wait);
+}
+
+/**
  * pcat_pm_uart_cmd_exec - Execute received PMU commands
  * @pm_data: Driver data
  * @rawdata: Raw packet data (for forwarding to userspace)
@@ -334,15 +379,13 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
  * @extra_data_len: Payload length
  * @need_ack: Acknowledgment requested
  *
- * Handles known commands internally and forwards unknown commands
+ * Handles known commands internally and forwards selected raw frames
  * to the userspace control device.
  */
 void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 	const u8 *rawdata, size_t rawdata_len, u8 src, u8 dst, u16 frame_num,
 	u16 command, const u8 *extra_data, u16 extra_data_len, bool need_ack)
 {
-	size_t overflow_size;
-
 	/* Filter by destination: host (0x01), broadcast (0x80), or all (0xFF) */
 	if (dst != 0x1 && dst != 0x80 && dst != 0xFF)
 		return;
@@ -427,24 +470,27 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 			dev_info(&pm_data->serdev->dev,
 				"PMU HW Version: %s\n", pm_data->pmu_hw_version);
 		}
+		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 		break;
 
 	case PCAT_PM_COMMAND_PMU_FW_VERSION_GET_ACK:
 		if (extra_data_len > 0) {
 			size_t copy_len = min_t(size_t, extra_data_len,
 				sizeof(pm_data->pmu_fw_version) - 1);
+			enum pcat_pm_rtc_capability rtc_capability;
 
 			mutex_lock(&pm_data->mutex);
 			memcpy(pm_data->pmu_fw_version, extra_data, copy_len);
 			pm_data->pmu_fw_version[copy_len] = '\0';
-			WRITE_ONCE(pm_data->battery_soc_stuck_100_quirk,
-				!strcmp(pm_data->pmu_fw_version,
-					"RA2E1260306000"));
+			rtc_capability = pm_data->pmu_fw_caps.rtc_capability;
 			mutex_unlock(&pm_data->mutex);
 
 			dev_info(&pm_data->serdev->dev,
-				"PMU FW Version: %s\n", pm_data->pmu_fw_version);
+				"PMU FW Version: %s (RTC %s)\n",
+				pm_data->pmu_fw_version,
+				pcat_pm_rtc_capability_name(rtc_capability));
 		}
+		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 		break;
 
 	case PCAT_PM_COMMAND_POWER_ON_EVENT_GET_ACK:
@@ -519,24 +565,7 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 
 	default:
 		/* Forward unknown commands to userspace control device */
-		mutex_lock(&pm_data->ctl_mutex);
-		if (pm_data->ctl_write_buffer_used + rawdata_len > PCAT_PM_BUFFER_SIZE) {
-			overflow_size = pm_data->ctl_write_buffer_used +
-				rawdata_len - PCAT_PM_BUFFER_SIZE;
-			memmove(pm_data->ctl_write_buffer,
-				pm_data->ctl_write_buffer + overflow_size,
-				PCAT_PM_BUFFER_SIZE - overflow_size);
-			memcpy(pm_data->ctl_write_buffer + PCAT_PM_BUFFER_SIZE - rawdata_len,
-				rawdata, rawdata_len);
-			pm_data->ctl_write_buffer_used = PCAT_PM_BUFFER_SIZE;
-		} else {
-			memcpy(pm_data->ctl_write_buffer + pm_data->ctl_write_buffer_used,
-				rawdata, rawdata_len);
-			pm_data->ctl_write_buffer_used += rawdata_len;
-		}
-		pm_data->ctl_write_buffer_ready = true;
-		mutex_unlock(&pm_data->ctl_mutex);
-		wake_up_interruptible_all(&pm_data->ctl_wait);
+		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 
 		dev_dbg(&pm_data->serdev->dev,
 			"Got command %X from %X to %X, frame num %d, "

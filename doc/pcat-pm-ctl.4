@@ -1,6 +1,6 @@
 .\" SPDX-License-Identifier: GPL-3.0-or-later
 .\" Man page for photonicat-pm kernel driver
-.TH PCAT-PM-CTL 4 "February 2026" "Linux" "Linux Programmer's Manual"
+.TH PCAT-PM-CTL 4 "May 2026" "Linux" "Linux Programmer's Manual"
 .SH NAME
 pcat-pm-ctl \- Photonicat power manager control device
 .SH SYNOPSIS
@@ -17,20 +17,66 @@ hatch for advanced use cases such as multi-entry scheduled boot.
 .PP
 Userspace writes a complete protocol frame; the kernel assigns a
 frame number, recomputes the CRC, and forwards allowed commands to
-the PMU. Responses can be read back (supports
+the PMU. Selected PMU responses can be read back (supports
 .BR poll (2)).
+This includes PMU hardware and firmware version acknowledgment frames;
+the driver still updates the corresponding sysfs attributes internally.
 See
 .I photonicat-pm.h
 for the protocol frame format and command definitions.
+.SS MCU Firmware Capability Policy
+The driver treats firmware behavior as runtime-observed capability or quirk
+detection, not as a static firmware-version allowlist or denylist.
+.TP
+.B RTC and scheduled boot
+Start as
+.BR pending-probe .
+For ABI stability,
+.I /dev/rtc0
+remains registered, but RTC reads, set-time, alarms, and raw scheduled-boot
+commands are blocked until the PMU reports three consecutive valid, advancing
+RTC samples. Passing that probe promotes
+.B pmu_rtc_capability
+to
+.BR enabled-probe .
+.TP
+.B Battery capacity
+Follows the vendor driver policy. PMU protocol v2 status reports use the
+PMU-reported SOC byte directly. Shorter status reports fall back to
+voltage-derived OCV SOC from the device-tree battery profile.
+.TP
+.B Energy and fan
+PMU protocol v2 energy fields and fan auto-speed reset are not trusted by
+current driver releases.
+.B energy_full
+remains the static device-tree design capacity,
+.B energy_now
+is not exported, and fan auto-speed restoration requires the documented
+workarounds.
+.PP
+Observed RTC results are evidence for diagnostics, not feature gates:
+.TP
+.B RA2E1250918000
+RTC promotes to
+.BR enabled-probe
+and scheduled boot works.
+.TP
+.B RA2E1260306000
+RTC remains
+.BR pending-probe
+and scheduled boot stays blocked by runtime validation.
 .SS Power Supply
 .TP
 .B /sys/class/power_supply/battery/
 Battery status, capacity (0\-100%), voltage, and current (read-only).
 .IP
-As of MCU firmware
-.BR RA2E1260306000 ,
-PMU protocol v2 status-report energy values are not validated as live or
-measured battery energy. This driver ignores PMU-reported energy values:
+Battery capacity follows the vendor driver parser: PMU protocol v2 status
+reports expose PMU SOC directly, while shorter status reports use the
+device-tree OCV capacity table as fallback.
+.IP
+Current driver policy does not trust PMU protocol v2 status-report energy
+values as live or measured battery energy. This driver ignores PMU-reported
+energy values:
 .B energy_full
 is the static
 .B energy-full-design-microwatt-hours
@@ -38,8 +84,7 @@ value from the
 .B simple-battery
 device-tree node, not PMU-measured full capacity;
 .B energy_now
-is not exported by current releases. Future firmware support should be enabled
-only after firmware or capability validation.
+is not exported by current releases.
 .TP
 .B /sys/class/power_supply/charger/
 Charger online status and input voltage (read-only).
@@ -55,13 +100,16 @@ RTC tools such as
 .BR rtcwake (8)
 work through this interface.
 .IP
-As of MCU firmware
-.BR RA2E1260306000 ,
-the hardware RTC is broken. Do not rely on
-.BR /dev/rtc0 ,
-RTC alarms, or scheduled boot via
-.BR rtcwake (8)
-until the MCU firmware is fixed.
+All firmware starts in
+.BR pending-probe ;
+the device remains registered, but RTC reads report invalid data and alarm
+programming fails until the driver observes three consecutive valid, advancing
+PMU RTC samples and promotes the capability to
+.BR enabled-probe .
+No firmware version string enables RTC or scheduled boot by itself.
+Raw scheduled-boot commands sent through
+.I /dev/pcat-pm-ctl
+are gated by the same RTC capability state.
 .SS Sensors & Fan
 .TP
 .B /sys/class/thermal/thermal_zone*/
@@ -91,16 +139,15 @@ if the driver has not sent a SET command since loading (the PMU could be at
 unmanaged fan speed or at a previously-set managed fan speed from before a reboot), or the
 managed fan speed percentage (0\-100) once set by the driver.
 .IP
-As of MCU firmware
-.BR RA2E1260306000 ,
-the MCU exposes no API to reset fan control back to PMU auto speed.
+Current tested firmware versions expose no trusted API to reset fan control
+back to PMU auto speed.
 .B unmanaged
 only means the driver has not sent a fan SET command since loading. Due to
-that MCU limitation, it may sometimes mean the PMU retained the last fixed fan
-speed instead of returning to PMU auto speed. In managed fan speed, after
-shutdown, the fan stays at the last fixed speed and will not adjust on its own.
-If the retained speed is low and the device is still charging or otherwise
-thermally active, this can be unsafe for thermal management.
+that limitation, it may sometimes mean the PMU retained the last fixed speed
+instead of returning to PMU auto speed. In managed fan speed, after shutdown,
+the fan stays at the last fixed speed and will not adjust on its own. If the
+retained speed is low and the device is still charging or otherwise thermally
+active, this can be unsafe for thermal management.
 .SS LEDs & Peripherals
 .TP
 .B /sys/kernel/photonicat-pm/status_led
@@ -125,9 +172,23 @@ detected, 0 otherwise.
 .TP
 .B /sys/kernel/photonicat-pm/pmu_hw_version
 PMU hardware version string (read-only). Queried from PMU on driver load.
+The raw version acknowledgment frame is also forwarded to
+.IR /dev/pcat-pm-ctl .
 .TP
 .B /sys/kernel/photonicat-pm/pmu_fw_version
 PMU firmware version string (read-only). Queried from PMU on driver load.
+The raw version acknowledgment frame is also forwarded to
+.IR /dev/pcat-pm-ctl ,
+which allows tools such as
+.BR pcat-pmu-updater
+.B --pmu-fw-version-get
+to read the response through the control device.
+.TP
+.B /sys/kernel/photonicat-pm/pmu_rtc_capability
+PMU RTC policy state (read-only). Values:
+.BR pending-probe
+or
+.BR enabled-probe .
 .TP
 .B /sys/kernel/photonicat-pm/power_on_event
 Last power-on event code (read-only). Values: 0 = unknown,
@@ -234,6 +295,9 @@ Turn off beeper:
 .TP
 Read PMU firmware version:
 .B cat /sys/kernel/photonicat-pm/pmu_fw_version
+.TP
+Read PMU RTC capability state:
+.B cat /sys/kernel/photonicat-pm/pmu_rtc_capability
 .TP
 Read power-on event:
 .B cat /sys/kernel/photonicat-pm/power_on_event

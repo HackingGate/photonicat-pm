@@ -8,9 +8,9 @@
  * SET command (via this cooling device, DT thermal policy, or other
  * software), the PMU switches to managed fan speed.
  *
- * CAUTION: As of MCU firmware RA2E1260306000, the MCU exposes no API to reset
- * fan control back to PMU auto speed. The README Fan Control section documents
- * the user-visible limitation and restore workarounds.
+ * CAUTION: Current tested firmware versions expose no trusted API to reset fan
+ * control back to PMU auto speed. The README Fan Control section documents the
+ * user-visible limitation and restore workarounds.
  *
  * Copyright (c) 2025, Kyosuke Nekoyashiki <supercatexpert@gmail.com>
  * Copyright (c) 2026, HackingGate <i@hackinggate.com>
