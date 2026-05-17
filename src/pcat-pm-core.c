@@ -192,6 +192,7 @@ static int pcat_pm_probe(struct serdev_device *serdev)
 	mutex_init(&pm_data->mutex);
 	mutex_init(&pm_data->rtc_cmd_mutex);
 	mutex_init(&pm_data->ctl_mutex);
+	mutex_init(&pm_data->ctl_read_mutex);
 	init_waitqueue_head(&pm_data->ctl_wait);
 	init_waitqueue_head(&pm_data->rtc_cmd_wait);
 

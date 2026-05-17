@@ -142,7 +142,8 @@ typedef enum {
  * @hwmon_speed_fan_dev: Hwmon device for fan speed
  * @tzdev: Thermal zone device for motherboard temperature (NULL if no DT binding)
  * @ctl_device: Misc device for userspace control
- * @ctl_mutex: Mutex protecting control device buffers
+ * @ctl_mutex: Mutex protecting control device output buffer
+ * @ctl_read_mutex: Mutex protecting control device input buffer
  * @ctl_wait: Wait queue for control device poll
  * @cdev: Thermal cooling device for fan control
  * @kobject: Kernel object for sysfs attributes
@@ -223,6 +224,7 @@ struct pcat_pm_data {
 	/* Control device */
 	struct miscdevice ctl_device;
 	struct mutex ctl_mutex;
+	struct mutex ctl_read_mutex;
 	wait_queue_head_t ctl_wait;
 	wait_queue_head_t rtc_cmd_wait;
 

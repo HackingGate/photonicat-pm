@@ -322,6 +322,48 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 }
 
 /**
+ * pcat_pm_ctl_forward_raw - Forward a raw PMU frame to the control device
+ * @pm_data: Driver data
+ * @rawdata: Raw packet data
+ * @rawdata_len: Packet length
+ */
+static void pcat_pm_ctl_forward_raw(struct pcat_pm_data *pm_data,
+	const u8 *rawdata, size_t rawdata_len)
+{
+	size_t copy_len;
+	size_t overflow_size;
+	const u8 *copy_from;
+
+	if (!rawdata || rawdata_len == 0)
+		return;
+
+	copy_len = min_t(size_t, rawdata_len, PCAT_PM_BUFFER_SIZE);
+	copy_from = rawdata + rawdata_len - copy_len;
+
+	mutex_lock(&pm_data->ctl_mutex);
+	if (copy_len == PCAT_PM_BUFFER_SIZE) {
+		memcpy(pm_data->ctl_write_buffer, copy_from, copy_len);
+		pm_data->ctl_write_buffer_used = copy_len;
+	} else {
+		if (pm_data->ctl_write_buffer_used + copy_len > PCAT_PM_BUFFER_SIZE) {
+			overflow_size = pm_data->ctl_write_buffer_used + copy_len -
+				PCAT_PM_BUFFER_SIZE;
+			memmove(pm_data->ctl_write_buffer,
+				pm_data->ctl_write_buffer + overflow_size,
+				pm_data->ctl_write_buffer_used - overflow_size);
+			pm_data->ctl_write_buffer_used -= overflow_size;
+		}
+
+		memcpy(pm_data->ctl_write_buffer + pm_data->ctl_write_buffer_used,
+			copy_from, copy_len);
+		pm_data->ctl_write_buffer_used += copy_len;
+	}
+	WRITE_ONCE(pm_data->ctl_write_buffer_ready, true);
+	mutex_unlock(&pm_data->ctl_mutex);
+	wake_up_interruptible_all(&pm_data->ctl_wait);
+}
+
+/**
  * pcat_pm_uart_cmd_exec - Execute received PMU commands
  * @pm_data: Driver data
  * @rawdata: Raw packet data (for forwarding to userspace)
@@ -334,15 +376,13 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
  * @extra_data_len: Payload length
  * @need_ack: Acknowledgment requested
  *
- * Handles known commands internally and forwards unknown commands
+ * Handles known commands internally and forwards selected raw frames
  * to the userspace control device.
  */
 void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 	const u8 *rawdata, size_t rawdata_len, u8 src, u8 dst, u16 frame_num,
 	u16 command, const u8 *extra_data, u16 extra_data_len, bool need_ack)
 {
-	size_t overflow_size;
-
 	/* Filter by destination: host (0x01), broadcast (0x80), or all (0xFF) */
 	if (dst != 0x1 && dst != 0x80 && dst != 0xFF)
 		return;
@@ -427,6 +467,7 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 			dev_info(&pm_data->serdev->dev,
 				"PMU HW Version: %s\n", pm_data->pmu_hw_version);
 		}
+		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 		break;
 
 	case PCAT_PM_COMMAND_PMU_FW_VERSION_GET_ACK:
@@ -445,6 +486,7 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 			dev_info(&pm_data->serdev->dev,
 				"PMU FW Version: %s\n", pm_data->pmu_fw_version);
 		}
+		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 		break;
 
 	case PCAT_PM_COMMAND_POWER_ON_EVENT_GET_ACK:
@@ -519,24 +561,7 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 
 	default:
 		/* Forward unknown commands to userspace control device */
-		mutex_lock(&pm_data->ctl_mutex);
-		if (pm_data->ctl_write_buffer_used + rawdata_len > PCAT_PM_BUFFER_SIZE) {
-			overflow_size = pm_data->ctl_write_buffer_used +
-				rawdata_len - PCAT_PM_BUFFER_SIZE;
-			memmove(pm_data->ctl_write_buffer,
-				pm_data->ctl_write_buffer + overflow_size,
-				PCAT_PM_BUFFER_SIZE - overflow_size);
-			memcpy(pm_data->ctl_write_buffer + PCAT_PM_BUFFER_SIZE - rawdata_len,
-				rawdata, rawdata_len);
-			pm_data->ctl_write_buffer_used = PCAT_PM_BUFFER_SIZE;
-		} else {
-			memcpy(pm_data->ctl_write_buffer + pm_data->ctl_write_buffer_used,
-				rawdata, rawdata_len);
-			pm_data->ctl_write_buffer_used += rawdata_len;
-		}
-		pm_data->ctl_write_buffer_ready = true;
-		mutex_unlock(&pm_data->ctl_mutex);
-		wake_up_interruptible_all(&pm_data->ctl_wait);
+		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 
 		dev_dbg(&pm_data->serdev->dev,
 			"Got command %X from %X to %X, frame num %d, "

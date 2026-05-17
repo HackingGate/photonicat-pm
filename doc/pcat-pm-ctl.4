@@ -17,8 +17,10 @@ hatch for advanced use cases such as multi-entry scheduled boot.
 .PP
 Userspace writes a complete protocol frame; the kernel assigns a
 frame number, recomputes the CRC, and forwards allowed commands to
-the PMU. Responses can be read back (supports
+the PMU. Selected PMU responses can be read back (supports
 .BR poll (2)).
+This includes PMU hardware and firmware version acknowledgment frames;
+the driver still updates the corresponding sysfs attributes internally.
 See
 .I photonicat-pm.h
 for the protocol frame format and command definitions.
@@ -125,9 +127,17 @@ detected, 0 otherwise.
 .TP
 .B /sys/kernel/photonicat-pm/pmu_hw_version
 PMU hardware version string (read-only). Queried from PMU on driver load.
+The raw version acknowledgment frame is also forwarded to
+.IR /dev/pcat-pm-ctl .
 .TP
 .B /sys/kernel/photonicat-pm/pmu_fw_version
 PMU firmware version string (read-only). Queried from PMU on driver load.
+The raw version acknowledgment frame is also forwarded to
+.IR /dev/pcat-pm-ctl ,
+which allows tools such as
+.BR pcat-pmu-updater
+.B --pmu-fw-version-get
+to read the response through the control device.
 .TP
 .B /sys/kernel/photonicat-pm/power_on_event
 Last power-on event code (read-only). Values: 0 = unknown,

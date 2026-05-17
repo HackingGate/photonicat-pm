@@ -66,7 +66,7 @@ for MCU firmware inspection and flashing workflows.
 
 | Interface | Description |
 |-----------|-------------|
-| `/dev/pcat-pm-ctl` | Raw PMU command interface. See `pcat-pm-ctl(4)` man page for frame format and details. |
+| `/dev/pcat-pm-ctl` | Raw PMU command interface. Userspace can read selected raw PMU responses, including hardware/firmware version ACKs used by `pcat-pmu-updater --pmu-fw-version-get`. See `pcat-pm-ctl(4)` man page for frame format and details. |
 
 ## Building
 
@@ -335,6 +335,11 @@ cat /sys/kernel/photonicat-pm/pmu_hw_version
 cat /sys/kernel/photonicat-pm/pmu_fw_version
 ```
 
+The driver also forwards the raw PMU hardware/firmware version ACK frames
+to `/dev/pcat-pm-ctl` for tools that query the PMU through the control
+device. The sysfs attributes above are still updated internally by the
+driver.
+
 ### Power-on Event
 
 ```bash
@@ -395,6 +400,9 @@ cat /sys/kernel/photonicat-pm/charger_on_auto_start
 ### Control Device (`/dev/pcat-pm-ctl`)
 
 Raw escape hatch for advanced PMU commands using the binary serial protocol.
+Userspace can read selected raw PMU responses from this device, including
+the PMU hardware/firmware version ACK frames used by
+`pcat-pmu-updater --pmu-fw-version-get`.
 See `pcat-pm-ctl(4)` man page for frame format and details.
 
 ## Protocol
