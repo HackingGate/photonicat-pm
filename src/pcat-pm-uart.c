@@ -18,6 +18,79 @@
 
 #include "photonicat-pm.h"
 
+#define PCAT_PM_RTC_PROBE_VALID_SAMPLES 3
+#define PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES 3
+
+static bool pcat_pm_battery_soc_ignore_pmu_100(struct pcat_pm_data *pm_data,
+	int pmu_soc, int fallback_soc, bool fallback_soc_valid)
+{
+	bool suspicious, ignore;
+
+	suspicious = pmu_soc == 100 && fallback_soc_valid && fallback_soc < 100;
+
+	mutex_lock(&pm_data->mutex);
+	if (pmu_soc >= 0 && pmu_soc < 100) {
+		pm_data->battery_soc_stuck_100_probe_samples = 0;
+		pm_data->battery_soc_stuck_100_quirk = false;
+	} else if (suspicious) {
+		if (pm_data->battery_soc_stuck_100_probe_samples <
+		    PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES)
+			pm_data->battery_soc_stuck_100_probe_samples++;
+
+		if (!pm_data->battery_soc_stuck_100_quirk &&
+		    pm_data->battery_soc_stuck_100_probe_samples >=
+		    PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES) {
+			pm_data->battery_soc_stuck_100_quirk = true;
+			dev_info(&pm_data->serdev->dev,
+				"PMU battery SOC stuck-100%% quirk enabled after runtime validation.\n");
+		}
+	} else {
+		pm_data->battery_soc_stuck_100_probe_samples = 0;
+	}
+	ignore = suspicious &&
+		(pm_data->battery_soc_stuck_100_probe_samples > 0 ||
+		 pm_data->battery_soc_stuck_100_quirk);
+	mutex_unlock(&pm_data->mutex);
+
+	return ignore;
+}
+
+static void pcat_pm_rtc_probe_update_locked(struct pcat_pm_data *pm_data,
+	struct rtc_time *rtc_time)
+{
+	time64_t sample_time;
+
+	if (pm_data->pmu_fw_caps.rtc_capability !=
+	    PCAT_PM_RTC_CAP_PENDING_PROBE)
+		return;
+
+	if (rtc_valid_tm(rtc_time)) {
+		pm_data->rtc_probe_valid_samples = 0;
+		pm_data->rtc_probe_last_time = 0;
+		return;
+	}
+
+	sample_time = rtc_tm_to_time64(rtc_time);
+	if (pm_data->rtc_probe_valid_samples == 0) {
+		pm_data->rtc_probe_valid_samples = 1;
+	} else if (sample_time < pm_data->rtc_probe_last_time) {
+		pm_data->rtc_probe_valid_samples = 1;
+	} else if (sample_time > pm_data->rtc_probe_last_time &&
+		   pm_data->rtc_probe_valid_samples <
+		   PCAT_PM_RTC_PROBE_VALID_SAMPLES) {
+		pm_data->rtc_probe_valid_samples++;
+	}
+	pm_data->rtc_probe_last_time = sample_time;
+
+	if (pm_data->rtc_probe_valid_samples >=
+	    PCAT_PM_RTC_PROBE_VALID_SAMPLES) {
+		pm_data->pmu_fw_caps.rtc_capability =
+			PCAT_PM_RTC_CAP_ENABLED_PROBE;
+		dev_info(&pm_data->serdev->dev,
+			"PMU RTC enabled after runtime validation.\n");
+	}
+}
+
 /**
  * pcat_pm_compute_crc16 - Compute Modbus CRC16 checksum
  * @data: Input data buffer
@@ -209,10 +282,13 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	bool prev_on_battery, prev_on_charger;
 	bool notify_power_supply = false;
 	int soc = 0, ocv_soc = -EINVAL, pmu_soc = -EINVAL;
+	bool fallback_soc_valid = false;
 	bool charging = false;
 	int gs_x = 0, gs_y = 0, gs_z = 0;
 	bool gs_ready = false;
 	u32 fan_rpm = 0;
+	struct rtc_time rtc_time = { 0 };
+	u16 rtc_year;
 
 	if (data_len < 16)
 		return;
@@ -226,6 +302,16 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 
 	(void)gpio_input;
 	(void)gpio_output;
+
+	/* Bytes 8-15: PMU RTC date/time */
+	rtc_year = data[8] + ((u16)data[9] << 8);
+	rtc_time.tm_year = rtc_year - 1900;
+	rtc_time.tm_mon = (int)data[10] - 1;
+	rtc_time.tm_mday = data[11];
+	rtc_time.tm_hour = data[12];
+	rtc_time.tm_min = data[13];
+	rtc_time.tm_sec = data[14];
+	rtc_time.tm_wday = data[15] % 7;
 
 	/* Bytes 17-19: Temperature and current (v2 protocol) */
 	if (data_len >= 20) {
@@ -250,20 +336,23 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 		ocv_soc = power_supply_batinfo_ocv2cap(
 			pm_data->battery_info, (int)battery_voltage * 1000, 20);
 		soc = ocv_soc;
+		fallback_soc_valid = soc >= 0 && soc <= 100;
 	}
 
 	/*
 	 * OCV overestimates SOC while the pack is being actively charged. Use a
 	 * charging-voltage curve here, then treat PMU SOC as advisory.
 	 */
-	if (charging)
+	if (charging) {
 		soc = pcat_pm_charge_voltage_to_soc(battery_voltage);
+		fallback_soc_valid = true;
+	}
 
 	if (data_len >= 31) {
 		pmu_soc = data[22];
-		if (pmu_soc <= 100 &&
-		    !(READ_ONCE(pm_data->battery_soc_stuck_100_quirk) &&
-		      pmu_soc == 100 && soc < 100))
+		if (!pcat_pm_battery_soc_ignore_pmu_100(pm_data, pmu_soc,
+				soc, fallback_soc_valid) &&
+		    pmu_soc <= 100)
 			soc = pmu_soc;
 	}
 
@@ -292,13 +381,14 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	pm_data->battery_energy_full = pm_data->battery_design_uwh;
 	pm_data->on_battery = on_battery;
 	pm_data->on_charger = on_charger;
-	pm_data->rtc_year = data[8] + ((u16)data[9] << 8);
-	pm_data->rtc_month = data[10] - 1;
-	pm_data->rtc_day = data[11];
-	pm_data->rtc_hour = data[12];
-	pm_data->rtc_min = data[13];
-	pm_data->rtc_sec = data[14];
-	pm_data->rtc_wday = data[15] % 7;
+	pm_data->rtc_year = rtc_year;
+	pm_data->rtc_month = (u8)rtc_time.tm_mon;
+	pm_data->rtc_day = rtc_time.tm_mday;
+	pm_data->rtc_hour = rtc_time.tm_hour;
+	pm_data->rtc_min = rtc_time.tm_min;
+	pm_data->rtc_sec = rtc_time.tm_sec;
+	pm_data->rtc_wday = rtc_time.tm_wday;
+	pcat_pm_rtc_probe_update_locked(pm_data, &rtc_time);
 	pm_data->board_temp = temp;
 	pm_data->gs_x = gs_x;
 	pm_data->gs_y = gs_y;
@@ -474,17 +564,18 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 		if (extra_data_len > 0) {
 			size_t copy_len = min_t(size_t, extra_data_len,
 				sizeof(pm_data->pmu_fw_version) - 1);
+			enum pcat_pm_rtc_capability rtc_capability;
 
 			mutex_lock(&pm_data->mutex);
 			memcpy(pm_data->pmu_fw_version, extra_data, copy_len);
 			pm_data->pmu_fw_version[copy_len] = '\0';
-			WRITE_ONCE(pm_data->battery_soc_stuck_100_quirk,
-				!strcmp(pm_data->pmu_fw_version,
-					"RA2E1260306000"));
+			rtc_capability = pm_data->pmu_fw_caps.rtc_capability;
 			mutex_unlock(&pm_data->mutex);
 
 			dev_info(&pm_data->serdev->dev,
-				"PMU FW Version: %s\n", pm_data->pmu_fw_version);
+				"PMU FW Version: %s (RTC %s)\n",
+				pm_data->pmu_fw_version,
+				pcat_pm_rtc_capability_name(rtc_capability));
 		}
 		pcat_pm_ctl_forward_raw(pm_data, rawdata, rawdata_len);
 		break;

@@ -7,6 +7,18 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 See the [Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki)
 for MCU firmware inspection and flashing workflows.
 
+## MCU Firmware Capability Policy
+
+The driver avoids enabling fragile PMU behavior solely from firmware version
+strings. RTC and scheduled boot start disabled as `pending-probe` and must pass
+runtime validation before RTC operations are enabled. The PMU SOC stuck-100%
+workaround is also runtime-detected from status reports instead of tied to a
+known firmware version.
+
+| Firmware version | Battery capacity policy | RTC / scheduled boot policy | Energy and fan policy |
+|------------------|-------------------------|-----------------------------|-----------------------|
+| All firmware | PMU SOC is accepted when plausible. If status reports repeatedly show PMU SOC `100` while voltage-derived fallback SOC is below 100, the driver uses fallback SOC and enables the stuck-100% workaround after three consecutive mismatches. | Starts as `pending-probe`; set-time, alarms, and raw scheduled boot remain blocked until three consecutive valid, advancing PMU RTC samples promote it to `enabled-probe`. | PMU energy fields and fan auto-speed reset are not trusted by current driver releases. |
+
 ## Features
 
 ### Power Supply
@@ -17,7 +29,12 @@ for MCU firmware inspection and flashing workflows.
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, PMU protocol v2 status-report energy values are not validated as live or measured battery energy. This driver ignores PMU-reported energy values: `energy_full` is the static `energy-full-design-microwatt-hours` value from the `simple-battery` device-tree node, not PMU-measured full capacity; `energy_now` is not exported by current releases.
+> Known affected firmware: `RA2E1260306000`.
+> PMU SOC can stick at `100`, and PMU protocol v2 status-report energy values
+> are not validated as live or measured battery energy. The driver probes the
+> stuck-100% SOC workaround from status reports, ignores PMU-reported energy
+> values, keeps `energy_full` as the static device-tree design capacity, and
+> does not export `energy_now`.
 
 ### Real-Time Clock & Scheduled Boot
 
@@ -26,7 +43,10 @@ for MCU firmware inspection and flashing workflows.
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
 
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, the hardware RTC is broken. Do not rely on `/dev/rtc0`, RTC alarms, or scheduled boot via `rtcwake(8)` until the MCU firmware is fixed.
+> Known affected firmware: `RA2E1260306000`.
+> The hardware RTC reports broken values. `/dev/rtc0` remains registered for
+> ABI stability, but RTC reads report invalid data and alarm programming fails
+> until runtime validation promotes `pmu_rtc_capability` to `enabled-probe`.
 
 ### Sensors & Fan
 
@@ -55,6 +75,7 @@ for MCU firmware inspection and flashing workflows.
 |-----------|-------------|
 | `/sys/kernel/photonicat-pm/pmu_hw_version` | PMU hardware version string (read-only). Queried from PMU on driver load. |
 | `/sys/kernel/photonicat-pm/pmu_fw_version` | PMU firmware version string (read-only). Queried from PMU on driver load. |
+| `/sys/kernel/photonicat-pm/pmu_rtc_capability` | PMU RTC policy state (read-only). Values: `pending-probe` or `enabled-probe`. |
 | `/sys/kernel/photonicat-pm/power_on_event` | Last power-on event code (read-only). Values: 0 = unknown, 1 = power button, 2 = scheduled, 3 = charger connected, 4 = USB. |
 
 ### Configuration
@@ -231,9 +252,12 @@ However, when the system shuts down, the software stops and the PMU retains the
 last SET value.
 
 > [!CAUTION]
-> As of MCU firmware `RA2E1260306000`, the MCU exposes no API to reset fan control back to PMU auto speed. The steps below are workarounds to restore PMU auto speed.
+> Known affected firmware: all tested firmware versions up to and including
+> `RA2E1260306000`.
+> No trusted API is exposed to reset fan control back to PMU auto speed. The
+> steps below are workarounds to restore PMU auto speed.
 >
-> Due to that MCU limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
+> Due to that firmware limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
 >
 > When in managed fan speed, after shutdown, the fan stays at the last fixed speed and will not adjust on its own. If the retained speed is low and the device is still charging or otherwise thermally active, this can be unsafe for thermal management.
 >
@@ -333,6 +357,7 @@ cat /sys/kernel/photonicat-pm/beeper
 ```bash
 cat /sys/kernel/photonicat-pm/pmu_hw_version
 cat /sys/kernel/photonicat-pm/pmu_fw_version
+cat /sys/kernel/photonicat-pm/pmu_rtc_capability
 ```
 
 The driver also forwards the raw PMU hardware/firmware version ACK frames
@@ -350,6 +375,13 @@ cat /sys/kernel/photonicat-pm/power_on_event
 ### Schedule Boot
 
 The driver registers an RTC device with alarm support. When an RTC alarm is set, the driver sends the alarm time to the PMU via UART (`SCHEDULE_STARTUP_TIME_SET`). The PMU stores this schedule and will power on the board at the specified time, even when the system is fully powered off. The alarm is one-shot (non-recurring).
+All firmware starts in `pending-probe`; `/dev/rtc0` remains registered, but RTC
+reads report invalid data and alarm programming fails until the driver observes
+three consecutive valid, advancing PMU RTC samples and promotes the capability
+to `enabled-probe`. No firmware version string enables RTC or scheduled boot by
+itself.
+Raw scheduled-boot commands sent through `/dev/pcat-pm-ctl` are gated by the
+same RTC capability state.
 
 This integrates with standard Linux RTC tools such as `rtcwake(8)`:
 

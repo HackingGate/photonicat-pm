@@ -32,6 +32,12 @@ void pcat_pm_ctl_cmd_exec(struct pcat_pm_data *pm_data,
 		break;
 	case PCAT_PM_COMMAND_DATE_TIME_SYNC_ACK:
 		break;
+	case PCAT_PM_COMMAND_SCHEDULE_STARTUP_TIME_SET:
+		forward_cmd = pcat_pm_rtc_capability_enabled(
+			READ_ONCE(pm_data->pmu_fw_caps.rtc_capability));
+		break;
+	case PCAT_PM_COMMAND_SCHEDULE_STARTUP_TIME_SET_ACK:
+		break;
 	case PCAT_PM_COMMAND_HOST_REQUEST_SHUTDOWN:
 		break;
 	case PCAT_PM_COMMAND_HOST_REQUEST_SHUTDOWN_ACK:

@@ -33,6 +33,7 @@
 #include <linux/hrtimer.h>
 #include <linux/property.h>
 #include <linux/serdev.h>
+#include <linux/pm_wakeup.h>
 #include <linux/reboot.h>
 #include <linux/power_supply.h>
 #include <linux/rtc.h>
@@ -127,6 +128,34 @@ typedef enum {
 	PCAT_PM_COMMAND_DEVICE_MOVEMENT_ACK = 0x96,
 } PCatPMCommandType;
 
+enum pcat_pm_rtc_capability {
+	PCAT_PM_RTC_CAP_PENDING_PROBE = 0,
+	PCAT_PM_RTC_CAP_ENABLED_PROBE,
+};
+
+static inline bool pcat_pm_rtc_capability_enabled(
+	enum pcat_pm_rtc_capability capability)
+{
+	return capability == PCAT_PM_RTC_CAP_ENABLED_PROBE;
+}
+
+static inline const char *pcat_pm_rtc_capability_name(
+	enum pcat_pm_rtc_capability capability)
+{
+	switch (capability) {
+	case PCAT_PM_RTC_CAP_PENDING_PROBE:
+		return "pending-probe";
+	case PCAT_PM_RTC_CAP_ENABLED_PROBE:
+		return "enabled-probe";
+	default:
+		return "unknown";
+	}
+}
+
+struct pcat_pm_fw_caps {
+	enum pcat_pm_rtc_capability rtc_capability;
+};
+
 /**
  * struct pcat_pm_data - Main driver state structure
  * @serdev: Serial device handle
@@ -174,6 +203,8 @@ typedef enum {
  * @battery_energy_now: Current energy in µWh
  * @battery_energy_full: Full charge energy in µWh
  * @battery_soc: State of charge (0-100%)
+ * @battery_soc_stuck_100_probe_samples: Consecutive suspicious PMU SOC samples
+ * @battery_soc_stuck_100_quirk: Runtime-detected PMU SOC stuck-100% quirk
  * @on_battery: True if running on battery power
  * @on_charger: True if charger is connected
  * @ps_initialized: True after first parsed PMU status report
@@ -190,6 +221,8 @@ typedef enum {
  * @rtc_min: RTC minute
  * @rtc_sec: RTC second
  * @rtc_wday: RTC day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+ * @rtc_probe_valid_samples: Consecutive valid PMU RTC samples for dynamic enable
+ * @rtc_probe_last_time: Last valid PMU RTC sample timestamp for monotonic probe
  * @fan_ctrl_speed: Fan control setting (0-100%)
  * @fan_managed: True once the driver has explicitly set fan speed
  * @movement_timestamp: Last movement detection time (ns)
@@ -198,6 +231,7 @@ typedef enum {
  * @beeper_enabled: Beeper enabled state
  * @pmu_hw_version: PMU hardware version string
  * @pmu_fw_version: PMU firmware version string
+ * @pmu_fw_caps: Runtime capability state for PMU-backed features
  * @power_on_event: Last power-on event code
  * @net_status_led_on_time: Network status LED on time (ms)
  * @net_status_led_off_time: Network status LED off time (ms)
@@ -268,6 +302,8 @@ struct pcat_pm_data {
 	int battery_energy_now;
 	int battery_energy_full;
 	int battery_soc;
+	u8 battery_soc_stuck_100_probe_samples;
+	bool battery_soc_stuck_100_quirk;
 	bool on_battery;
 	bool on_charger;
 	bool ps_initialized;
@@ -288,6 +324,8 @@ struct pcat_pm_data {
 	u8 rtc_min;
 	u8 rtc_sec;
 	u8 rtc_wday;
+	u8 rtc_probe_valid_samples;
+	time64_t rtc_probe_last_time;
 	u16 rtc_sync_ack_frame;
 	u16 schedule_boot_ack_frame;
 	u8 rtc_sync_ack_status;
@@ -315,7 +353,7 @@ struct pcat_pm_data {
 	/* PMU information */
 	char pmu_hw_version[32];
 	char pmu_fw_version[32];
-	bool battery_soc_stuck_100_quirk;
+	struct pcat_pm_fw_caps pmu_fw_caps;
 	u8 power_on_event;
 
 	/* Network status LED */
@@ -543,7 +581,8 @@ void pcat_pm_ctl_cmd_exec(struct pcat_pm_data *pm_data,
  *
  * Creates /sys/kernel/photonicat-pm/ with sysfs attributes for:
  * movement detection, status LED, beeper, PMU hardware/firmware version,
- * power-on event, network status LED, and charger auto-start.
+ * PMU RTC capability, power-on event, network status LED, and charger
+ * auto-start.
  *
  * Return: 0 on success, negative error otherwise
  */
