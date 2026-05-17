@@ -19,41 +19,6 @@
 #include "photonicat-pm.h"
 
 #define PCAT_PM_RTC_PROBE_VALID_SAMPLES 3
-#define PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES 3
-
-static bool pcat_pm_battery_soc_ignore_pmu_100(struct pcat_pm_data *pm_data,
-	int pmu_soc, int fallback_soc, bool fallback_soc_valid)
-{
-	bool suspicious, ignore;
-
-	suspicious = pmu_soc == 100 && fallback_soc_valid && fallback_soc < 100;
-
-	mutex_lock(&pm_data->mutex);
-	if (pmu_soc >= 0 && pmu_soc < 100) {
-		pm_data->battery_soc_stuck_100_probe_samples = 0;
-		pm_data->battery_soc_stuck_100_quirk = false;
-	} else if (suspicious) {
-		if (pm_data->battery_soc_stuck_100_probe_samples <
-		    PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES)
-			pm_data->battery_soc_stuck_100_probe_samples++;
-
-		if (!pm_data->battery_soc_stuck_100_quirk &&
-		    pm_data->battery_soc_stuck_100_probe_samples >=
-		    PCAT_PM_BATTERY_SOC_STUCK_100_PROBE_SAMPLES) {
-			pm_data->battery_soc_stuck_100_quirk = true;
-			dev_info(&pm_data->serdev->dev,
-				"PMU battery SOC stuck-100%% quirk enabled after runtime validation.\n");
-		}
-	} else {
-		pm_data->battery_soc_stuck_100_probe_samples = 0;
-	}
-	ignore = suspicious &&
-		(pm_data->battery_soc_stuck_100_probe_samples > 0 ||
-		 pm_data->battery_soc_stuck_100_quirk);
-	mutex_unlock(&pm_data->mutex);
-
-	return ignore;
-}
 
 static void pcat_pm_rtc_probe_update_locked(struct pcat_pm_data *pm_data,
 	struct rtc_time *rtc_time)
@@ -117,37 +82,6 @@ u16 pcat_pm_compute_crc16(const u8 *data, size_t len)
 	}
 
 	return crc;
-}
-
-static int pcat_pm_charge_voltage_to_soc(u16 battery_voltage)
-{
-	static const struct {
-		u16 voltage;
-		int capacity;
-	} charge_curve[] = {
-		{ 8400, 100 }, { 8300, 90 }, { 8200, 80 }, { 8100, 70 },
-		{ 8000, 60 }, { 7900, 50 }, { 7800, 40 }, { 7700, 30 },
-		{ 7600, 20 }, { 7500, 10 }, { 7400, 0 },
-	};
-	int i;
-
-	if (battery_voltage >= charge_curve[0].voltage)
-		return charge_curve[0].capacity;
-
-	for (i = 1; i < ARRAY_SIZE(charge_curve); i++) {
-		const u16 high_voltage = charge_curve[i - 1].voltage;
-		const u16 low_voltage = charge_curve[i].voltage;
-		const int high_capacity = charge_curve[i - 1].capacity;
-		const int low_capacity = charge_curve[i].capacity;
-
-		if (battery_voltage >= low_voltage) {
-			return low_capacity + (battery_voltage - low_voltage) *
-				(high_capacity - low_capacity) /
-				(high_voltage - low_voltage);
-		}
-	}
-
-	return charge_curve[ARRAY_SIZE(charge_curve) - 1].capacity;
 }
 
 static void pcat_pm_record_rtc_ack(struct pcat_pm_data *pm_data, bool *ack_seen,
@@ -281,9 +215,7 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	bool on_battery, on_charger;
 	bool prev_on_battery, prev_on_charger;
 	bool notify_power_supply = false;
-	int soc = 0, ocv_soc = -EINVAL, pmu_soc = -EINVAL;
-	bool fallback_soc_valid = false;
-	bool charging = false;
+	int soc = 0;
 	int gs_x = 0, gs_y = 0, gs_z = 0;
 	bool gs_ready = false;
 	u32 fan_rpm = 0;
@@ -318,7 +250,6 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 		temp = (int)data[17] - 100;
 		battery_current_raw = data[18] + ((u16)data[19] << 8);
 		battery_current = (s16)battery_current_raw;
-		charging = (battery_current < -50);
 		/*
 		 * PMU raw current sign: positive = discharging (out of battery),
 		 * negative = charging (into battery).
@@ -332,29 +263,11 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 		on_battery = !on_charger;
 	}
 
-	if (pm_data->battery_info) {
-		ocv_soc = power_supply_batinfo_ocv2cap(
+	if (data_len >= 31)
+		soc = data[22];
+	else if (pm_data->battery_info)
+		soc = power_supply_batinfo_ocv2cap(
 			pm_data->battery_info, (int)battery_voltage * 1000, 20);
-		soc = ocv_soc;
-		fallback_soc_valid = soc >= 0 && soc <= 100;
-	}
-
-	/*
-	 * OCV overestimates SOC while the pack is being actively charged. Use a
-	 * charging-voltage curve here, then treat PMU SOC as advisory.
-	 */
-	if (charging) {
-		soc = pcat_pm_charge_voltage_to_soc(battery_voltage);
-		fallback_soc_valid = true;
-	}
-
-	if (data_len >= 31) {
-		pmu_soc = data[22];
-		if (!pcat_pm_battery_soc_ignore_pmu_100(pm_data, pmu_soc,
-				soc, fallback_soc_valid) &&
-		    pmu_soc <= 100)
-			soc = pmu_soc;
-	}
 
 	/* Bytes 35-51: Accelerometer and fan speed */
 	if (data_len >= 52) {

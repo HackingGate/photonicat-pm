@@ -5,13 +5,20 @@ photonicat-pm (1.0.3-1) unstable; urgency=medium
     PMU replies.
   * Serialize raw-control input separately from output delivery so PMU ACK
     frames remain readable by /dev/pcat-pm-ctl userspace consumers.
+  * Align battery capacity parsing with the vendor driver: PMU protocol v2
+    status reports use PMU-reported SOC, while shorter status reports use OCV
+    fallback from the battery profile.
+  * Remove the experimental stuck-100% SOC override so PMU protocol v2 capacity
+    reporting matches the vendor parser.
   * Gate PMU behavior through runtime validation and keep /dev/rtc0 registered
     while RTC reads and scheduled boot stay disabled until valid, advancing PMU
     RTC samples are observed.
+  * Expose the runtime RTC policy state through pmu_rtc_capability and enable
+    PMU-backed RTC wakeups once validation promotes RTC support.
   * Document the PMU firmware capability policy without using version strings as
     feature gates.
 
- -- HackingGate <i@hackinggate.com>  Sat, 16 May 2026 00:48:11 +0900
+ -- HackingGate <i@hackinggate.com>  Sun, 17 May 2026 14:33:17 +0900
 
 photonicat-pm (1.0.2-1) unstable; urgency=medium
 

@@ -203,8 +203,6 @@ struct pcat_pm_fw_caps {
  * @battery_energy_now: Current energy in µWh
  * @battery_energy_full: Full charge energy in µWh
  * @battery_soc: State of charge (0-100%)
- * @battery_soc_stuck_100_probe_samples: Consecutive suspicious PMU SOC samples
- * @battery_soc_stuck_100_quirk: Runtime-detected PMU SOC stuck-100% quirk
  * @on_battery: True if running on battery power
  * @on_charger: True if charger is connected
  * @ps_initialized: True after first parsed PMU status report
@@ -302,8 +300,6 @@ struct pcat_pm_data {
 	int battery_energy_now;
 	int battery_energy_full;
 	int battery_soc;
-	u8 battery_soc_stuck_100_probe_samples;
-	bool battery_soc_stuck_100_quirk;
 	bool on_battery;
 	bool on_charger;
 	bool ps_initialized;

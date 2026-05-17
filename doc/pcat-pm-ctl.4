@@ -1,6 +1,6 @@
 .\" SPDX-License-Identifier: GPL-3.0-or-later
 .\" Man page for photonicat-pm kernel driver
-.TH PCAT-PM-CTL 4 "February 2026" "Linux" "Linux Programmer's Manual"
+.TH PCAT-PM-CTL 4 "May 2026" "Linux" "Linux Programmer's Manual"
 .SH NAME
 pcat-pm-ctl \- Photonicat power manager control device
 .SH SYNOPSIS
@@ -25,30 +25,58 @@ See
 .I photonicat-pm.h
 for the protocol frame format and command definitions.
 .SS MCU Firmware Capability Policy
-The driver avoids enabling fragile PMU behavior solely from firmware version
-strings. RTC and scheduled boot start disabled as
-.BR pending-probe
-and must pass runtime validation before RTC operations are enabled. The PMU SOC
-stuck-100% workaround is also runtime-detected from status reports instead of
-tied to a known firmware version.
-.TS
-tab(|);
-l l.
-Firmware|Driver policy
-All firmware|PMU SOC accepted when plausible; stuck-100% probed from status reports; RTC pending-probe until runtime validation; energy/fan untrusted.
-.TE
-.PP
+The driver treats firmware behavior as runtime-observed capability or quirk
+detection, not as a static firmware-version allowlist or denylist.
+.TP
+.B RTC and scheduled boot
+Start as
+.BR pending-probe .
 For ABI stability,
 .I /dev/rtc0
-remains registered while RTC capability is pending.
+remains registered, but RTC reads, set-time, alarms, and raw scheduled-boot
+commands are blocked until the PMU reports three consecutive valid, advancing
+RTC samples. Passing that probe promotes
+.B pmu_rtc_capability
+to
+.BR enabled-probe .
+.TP
+.B Battery capacity
+Follows the vendor driver policy. PMU protocol v2 status reports use the
+PMU-reported SOC byte directly. Shorter status reports fall back to
+voltage-derived OCV SOC from the device-tree battery profile.
+.TP
+.B Energy and fan
+PMU protocol v2 energy fields and fan auto-speed reset are not trusted by
+current driver releases.
+.B energy_full
+remains the static device-tree design capacity,
+.B energy_now
+is not exported, and fan auto-speed restoration requires the documented
+workarounds.
+.PP
+Observed RTC results are evidence for diagnostics, not feature gates:
+.TP
+.B RA2E1250918000
+RTC promotes to
+.BR enabled-probe
+and scheduled boot works.
+.TP
+.B RA2E1260306000
+RTC remains
+.BR pending-probe
+and scheduled boot stays blocked by runtime validation.
 .SS Power Supply
 .TP
 .B /sys/class/power_supply/battery/
 Battery status, capacity (0\-100%), voltage, and current (read-only).
 .IP
-Current firmware capability profiles do not validate PMU protocol v2
-status-report energy values as live or measured battery energy. This driver
-ignores PMU-reported energy values:
+Battery capacity follows the vendor driver parser: PMU protocol v2 status
+reports expose PMU SOC directly, while shorter status reports use the
+device-tree OCV capacity table as fallback.
+.IP
+Current driver policy does not trust PMU protocol v2 status-report energy
+values as live or measured battery energy. This driver ignores PMU-reported
+energy values:
 .B energy_full
 is the static
 .B energy-full-design-microwatt-hours
@@ -111,8 +139,8 @@ if the driver has not sent a SET command since loading (the PMU could be at
 unmanaged fan speed or at a previously-set managed fan speed from before a reboot), or the
 managed fan speed percentage (0\-100) once set by the driver.
 .IP
-Current firmware capability profiles expose no trusted API to reset fan
-control back to PMU auto speed.
+Current tested firmware versions expose no trusted API to reset fan control
+back to PMU auto speed.
 .B unmanaged
 only means the driver has not sent a fan SET command since loading. Due to
 that limitation, it may sometimes mean the PMU retained the last fixed speed
