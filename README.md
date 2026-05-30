@@ -31,6 +31,7 @@ Observed RTC results are evidence for diagnostics, not feature gates:
 |------------------|---------------------|
 | `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. |
 | `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
+| `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
 
 ## Features
 
@@ -38,7 +39,7 @@ Observed RTC results are evidence for diagnostics, not feature gates:
 
 | Interface | Description |
 |-----------|-------------|
-| `/sys/class/power_supply/battery/` | Battery status, capacity (0–100%), voltage, and current (read-only). |
+| `/sys/class/power_supply/battery/` | Battery status, capacity (0–100%), voltage, current, power, and static design energy (read-only). |
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
 Battery capacity follows the vendor driver parser: PMU protocol v2 status
@@ -48,7 +49,9 @@ device-tree OCV capacity table as fallback.
 > [!CAUTION]
 > PMU protocol v2 status-report energy values are not validated as live or
 > measured battery energy. The driver keeps `energy_full` as the static
-> device-tree design capacity and does not export `energy_now`.
+> device-tree design capacity and does not export `energy_now`. The
+> `power_now` value is computed from PMU voltage and current, not from PMU
+> energy fields.
 
 ### Real-Time Clock & Scheduled Boot
 
@@ -57,7 +60,7 @@ device-tree OCV capacity table as fallback.
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
 
 > [!CAUTION]
-> Known affected firmware: `RA2E1260306000`.
+> Known affected firmware: `RA2E1260306000`, `RA2E1260515000`.
 > The hardware RTC reports broken values. `/dev/rtc0` remains registered for
 > ABI stability, but RTC reads report invalid data and alarm programming fails
 > until runtime validation promotes `pmu_rtc_capability` to `enabled-probe`.
@@ -97,11 +100,12 @@ device-tree OCV capacity table as fallback.
 | Interface | Description |
 |-----------|-------------|
 | `/sys/kernel/photonicat-pm/charger_on_auto_start` | Charger auto-start control (read-write). Write 1 to enable automatic startup when charger is connected, 0 to disable. |
+
 ### Advanced
 
 | Interface | Description |
 |-----------|-------------|
-| `/dev/pcat-pm-ctl` | Raw PMU command interface. Userspace can read selected raw PMU responses, including hardware/firmware version ACKs used by `pcat-pmu-updater --pmu-fw-version-get`. See `pcat-pm-ctl(4)` man page for frame format and details. |
+| `/dev/pcat-pm-ctl` | Root-only raw PMU command interface. Userspace can read selected raw PMU responses, including hardware/firmware version ACKs used by `pcat-pmu-updater --pmu-fw-version-get`. See `pcat-pm-ctl(4)` man page for frame format and details. |
 
 ## Building
 
@@ -246,6 +250,9 @@ cat /sys/class/power_supply/battery/status
 cat /sys/class/power_supply/battery/energy_full
 # Static design full charge capacity from device tree, not live/measured capacity
 
+cat /sys/class/power_supply/battery/power_now
+# Computed from voltage_now and current_now
+
 test ! -e /sys/class/power_supply/battery/energy_now
 # energy_now is intentionally not exported by current driver releases
 ```
@@ -268,7 +275,7 @@ last SET value.
 
 > [!CAUTION]
 > Known affected firmware: all tested firmware versions up to and including
-> `RA2E1260306000`.
+> `RA2E1260515000`.
 > No trusted API is exposed to reset fan control back to PMU auto speed. The
 > steps below are workarounds to restore PMU auto speed.
 >

@@ -65,10 +65,16 @@ and scheduled boot works.
 RTC remains
 .BR pending-probe
 and scheduled boot stays blocked by runtime validation.
+.TP
+.B RA2E1260515000
+RTC remains
+.BR pending-probe
+and scheduled boot stays blocked by runtime validation.
 .SS Power Supply
 .TP
 .B /sys/class/power_supply/battery/
-Battery status, capacity (0\-100%), voltage, and current (read-only).
+Battery status, capacity (0\-100%), voltage, current, power, and static
+design energy (read-only).
 .IP
 Battery capacity follows the vendor driver parser: PMU protocol v2 status
 reports expose PMU SOC directly, while shorter status reports use the
@@ -85,6 +91,8 @@ value from the
 device-tree node, not PMU-measured full capacity;
 .B energy_now
 is not exported by current releases.
+.B power_now
+is computed from PMU voltage and current, not from PMU energy fields.
 .TP
 .B /sys/class/power_supply/charger/
 Charger online status and input voltage (read-only).
@@ -260,6 +268,9 @@ Read battery capacity:
 .TP
 Read static design full charge capacity:
 .B cat /sys/class/power_supply/battery/energy_full
+.TP
+Read computed instantaneous power:
+.B cat /sys/class/power_supply/battery/power_now
 .TP
 Check that live energy is not exported:
 .B test ! \-e /sys/class/power_supply/battery/energy_now
