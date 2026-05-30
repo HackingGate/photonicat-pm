@@ -1,3 +1,13 @@
+photonicat-pm (1.0.4-1) unstable; urgency=medium
+
+  * Document verified PMU firmware RA2E1260515000 RTC behavior.
+  * Document current battery and control-device ABI, including computed
+    power_now, absent energy_now, and static energy_full behavior.
+  * Reject out-of-range fan cooling states before sending PMU FAN_SET
+    commands.
+
+ -- HackingGate <i@hackinggate.com>  Sat, 30 May 2026 16:58:43 +0900
+
 photonicat-pm (1.0.3-1) unstable; urgency=medium
 
   * Forward PMU hardware and firmware version acknowledgment frames to
