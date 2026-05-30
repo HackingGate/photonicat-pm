@@ -44,8 +44,12 @@ static int pcat_pm_fan_set_cur_state(struct thermal_cooling_device *cdev,
 	unsigned long state)
 {
 	struct pcat_pm_data *pm_data = cdev->devdata;
-	u8 speed = (u8)state;
+	u8 speed;
 
+	if (state > PCAT_PM_FAN_MAX_STATE)
+		return -EINVAL;
+
+	speed = (u8)state;
 	pm_data->fan_ctrl_speed = speed;
 	pm_data->fan_managed = true;
 
