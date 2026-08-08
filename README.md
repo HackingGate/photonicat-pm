@@ -28,15 +28,22 @@ detection, not as a static firmware-version allowlist or denylist.
   `STATUS_LED_BEEPER_V2_SET_ACK`, so a refused write is visible as a readback
   that reverts. Some firmware refuses to turn the status LED off.
 
-Observed RTC results are evidence for diagnostics, not feature gates:
+Observed per-firmware results are evidence for diagnostics, not feature gates:
 
-| Firmware version | Observed RTC result |
-|------------------|---------------------|
-| `RA2E1250815002` | Promotes to `enabled-probe`; scheduled boot works. |
-| `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. |
-| `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
-| `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
-| `RA2E1260730001` | Not evaluated. The PMU does not stay on this firmware; see [MCU Firmware `RA2E1260730001` Does Not Persist](#mcu-firmware-ra2e1260730001-does-not-persist). |
+| Firmware version | RTC and scheduled boot | Status LED off |
+|------------------|------------------------|----------------|
+| `RA2E1250815002` | Promotes to `enabled-probe`; scheduled boot works. | Refused; PMU ACK reports the LED still enabled. |
+| `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. |
+| `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
+| `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
+| `RA2E1260730001` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
+
+`RA2E1260730001` has no observations because it never survives a flash. See
+[MCU Firmware `RA2E1260730001` Does Not Persist](#mcu-firmware-ra2e1260730001-does-not-persist).
+
+Fan auto-speed reset is not per-firmware: no tested version exposes a trusted
+API for it, so it stays a prose caution under [Fan Control](#fan-control)
+rather than a column here.
 
 `pmu_hw_version` is reported by the running MCU firmware, not read from a
 board-independent identifier. The same board reported `NT2421A4` under
@@ -143,16 +150,8 @@ device-tree OCV capacity table as fallback.
 > The PMU refuses to turn the status LED off. The driver sends
 > `STATUS_LED_BEEPER_V2_SET` (`0x9B`) with the LED bit clear, and the PMU
 > answers `STATUS_LED_BEEPER_V2_SET_ACK` (`0x9C`) with the LED bit still set.
-> Beeper control on the same command is honored.
-
-Observed status LED results:
-
-| Firmware version | Observed status LED result |
-|------------------|----------------------------|
-| `RA2E1250815002` | Write of 0 refused; PMU ACK reports the LED still enabled. |
-| `RA2E1250918000` | Write of 0 honored. |
-| `RA2E1260306000` | Write of 0 honored. |
-| `RA2E1260515000` | Write of 0 honored. |
+> Beeper control on the same command is honored. Per-firmware results are in
+> [MCU Firmware Capability Policy](#mcu-firmware-capability-policy).
 
 `status_led` and `beeper` reads report the state from the PMU's last ACK, not
 the value last written. A read issued immediately after a write returns the
