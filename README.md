@@ -29,9 +29,58 @@ Observed RTC results are evidence for diagnostics, not feature gates:
 
 | Firmware version | Observed RTC result |
 |------------------|---------------------|
+| `RA2E1250815002` | Promotes to `enabled-probe`; scheduled boot works. |
 | `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. |
 | `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
 | `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
+| `RA2E1260730001` | Not evaluated. The PMU does not stay on this firmware; see [MCU Firmware `RA2E1260730001` Does Not Persist](#mcu-firmware-ra2e1260730001-does-not-persist). |
+
+`pmu_hw_version` is reported by the running MCU firmware, not read from a
+board-independent identifier. The same board reported `NT2421A4` under
+`RA2E1260515000` and `NT2421A3` under `RA2E1250815002`. Treat
+`pmu_hw_version` as a firmware-reported string, not as a stable board
+revision.
+
+## MCU Firmware `RA2E1260730001` Does Not Persist
+
+The vendor manifest
+(`https://dl.photonicat.com/firmware/pcat2_mcu/latest_img.json`) published
+`RA2E1260730001` on 2026-07-30, matching the Photonicat 2 OpenWrt `r7853`
+release. The same package is served at the fixed
+`https://dl.photonicat.com/firmware/pcat2_mcu/ota.bin` rollback URL.
+
+That package downloads and validates correctly (manifest SHA256, `ARBDPHC2`
+magic, `RA2E1` version, 63304-byte payload, CRC32 `5a5d0144`), and the upstream
+`pcat-pmu-updater` streams it to 100% and prints
+`PMU firmware updated successfully.` before powering the system off. The PMU
+then restarts the board on its own and reports `RA2E1250815002` — an older
+2025-08-15 build — instead of the flashed version.
+
+Observed on this driver:
+
+| Version before flash | Version after flash |
+|----------------------|---------------------|
+| `RA2E1260515000` | `RA2E1250815002` |
+| `RA2E1250815002` | `RA2E1250815002` |
+
+The same rollback has been reported independently on the vendor OpenWrt image
+using the vendor's own `pcat-pmu-updater`, flashing the same package from
+`RA2E1260702000`. The rollback is therefore an MCU-side behavior of
+`RA2E1260730001`, not a fault in this driver's raw control path: the updater's
+`--pmu-fw-version-get` query, the `0xCB`/`0xCD`/`0xD3`/`0xCF` update sequence,
+and the success acknowledgement all complete through `/dev/pcat-pm-ctl`.
+
+Do not treat a successful `pcat-pmu-updater` run as proof of an applied
+update. Always re-read the version after the board comes back up:
+
+```bash
+cat /sys/kernel/photonicat-pm/pmu_fw_version
+sudo pcat-pmu-updater --pmu-fw-version-get
+```
+
+Because `ota.bin` now serves `RA2E1260730001`, there is no published rollback
+path back to `RA2E1260515000`; a board that lands on `RA2E1250815002` stays
+there unless an older package is recovered from a prior OpenWrt image.
 
 ## Features
 
