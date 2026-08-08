@@ -13,12 +13,19 @@ This project is an independent Linux kernel driver. It is the host side of the
 UART link only. It does not build, sign, package, or distribute MCU firmware,
 and it cannot change how the MCU behaves once a command reaches it.
 
-The MCU firmware is closed source. There is no published source, protocol
-specification, or command reference for it. Every protocol detail in this
-repository — command numbers, payload layouts, and the per-firmware behavior
-recorded below — comes from observing the wire, not from vendor documentation.
-Expect gaps, and expect behavior to change between firmware versions without
-notice.
+The MCU firmware itself is closed source and is published only as a wrapped
+binary image. The UART protocol it speaks is not: the vendor's userspace
+manager,
+[`photonicat/rockchip_rk3568_pcat_manager`](https://github.com/photonicat/rockchip_rk3568_pcat_manager),
+is open source and carries the command numbers and payload layouts in
+`src/pmu-manager.c`. That source, together with observation of the wire, is
+where this driver's protocol definitions come from.
+
+What is missing is a specification and any account of behavior. No document
+states which commands a given firmware version honors, what it does when it
+declines one, or which fields are trustworthy. The per-firmware results
+recorded below were established by testing against real hardware, and they can
+change between firmware versions without notice.
 
 Firmware defects are therefore outside what this driver can fix. A PMU that
 ignores a command, reports a broken clock, or rolls back an update is behaving
