@@ -26,13 +26,14 @@ detection, not as a static firmware-version allowlist or denylist.
   restoration requires the documented workarounds.
 - **Status LED and beeper**: the driver reports the state from the PMU's last
   `STATUS_LED_BEEPER_V2_SET_ACK`, so a refused write is visible as a readback
-  that reverts. Some firmware refuses to turn the status LED off.
+  that reverts. Some firmware ignores the set command entirely and reports a
+  constant state, which leaves both attributes uncontrollable.
 
 Observed per-firmware results are evidence for diagnostics, not feature gates:
 
-| Firmware version | RTC and scheduled boot | Status LED off |
-|------------------|------------------------|----------------|
-| `RA2E1250815002` | Promotes to `enabled-probe`; scheduled boot works. | Refused; PMU ACK reports the LED still enabled. |
+| Firmware version | RTC and scheduled boot | Status LED and beeper control |
+|------------------|------------------------|-------------------------------|
+| `RA2E1250815002` | Promotes to `enabled-probe`; scheduled boot works. | Ignored; the PMU acknowledges state `0x01` whatever is requested. |
 | `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. |
 | `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
 | `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
@@ -160,10 +161,17 @@ device-tree OCV capacity table as fallback.
 
 > [!CAUTION]
 > Known affected firmware: `RA2E1250815002`.
-> The PMU refuses to turn the status LED off. The driver sends
-> `STATUS_LED_BEEPER_V2_SET` (`0x9B`) with the LED bit clear, and the PMU
-> answers `STATUS_LED_BEEPER_V2_SET_ACK` (`0x9C`) with the LED bit still set.
-> Beeper control on the same command is honored. Per-firmware results are in
+> The PMU ignores `STATUS_LED_BEEPER_V2_SET` (`0x9B`). Whatever state the
+> driver requests, the PMU answers `STATUS_LED_BEEPER_V2_SET_ACK` (`0x9C`)
+> with a constant payload of `0x01`: status LED bit set, beeper bit clear.
+> Requesting the LED off and requesting the beeper on are both refused, so
+> neither `status_led` nor `beeper` is controllable on this firmware.
+>
+> Because the acknowledged beeper bit is stuck at 0, `beeper` reads 0 while
+> the board still beeps audibly. A 0 here means the PMU reported 0, not that
+> the beeper is silent.
+>
+> Per-firmware results are in
 > [MCU Firmware Capability Policy](#mcu-firmware-capability-policy).
 
 `status_led` and `beeper` reads report the state from the PMU's last ACK, not
@@ -459,9 +467,14 @@ echo 1 > /sys/kernel/photonicat-pm/beeper
 # Turn off beeper
 echo 0 > /sys/kernel/photonicat-pm/beeper
 
-# Read current beeper state
+# Read current beeper state, once the PMU ACK has landed
+sleep 1
 cat /sys/kernel/photonicat-pm/beeper
 ```
+
+On firmware that ignores the set command, the read returns the PMU's constant
+state instead of the requested one. See the caution under
+[LEDs & Peripherals](#leds--peripherals).
 
 ### PMU Hardware / Firmware Version
 
