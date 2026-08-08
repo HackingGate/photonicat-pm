@@ -7,6 +7,33 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 See the [Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki)
 for MCU firmware inspection and flashing workflows.
 
+## Scope
+
+This project is an independent Linux kernel driver. It is the host side of the
+UART link only. It does not build, sign, package, or distribute MCU firmware,
+and it cannot change how the MCU behaves once a command reaches it.
+
+The MCU firmware itself is closed source and is published only as a wrapped
+binary image. The UART protocol it speaks is not: the vendor's userspace
+manager,
+[`photonicat/rockchip_rk3568_pcat_manager`](https://github.com/photonicat/rockchip_rk3568_pcat_manager),
+is open source and carries the command numbers and payload layouts in
+`src/pmu-manager.c`. That source, together with observation of the wire, is
+where this driver's protocol definitions come from.
+
+What is missing is a specification and any account of behavior. No document
+states which commands a given firmware version honors, what it does when it
+declines one, or which fields are trustworthy. The per-firmware results
+recorded below were established by testing against real hardware, and they can
+change between firmware versions without notice.
+
+Firmware defects are therefore outside what this driver can fix. A PMU that
+ignores a command, reports a broken clock, or rolls back an update is behaving
+that way before the driver sees the response. Such behavior is documented here
+so users can recognize it, and should be reported to the vendor. Issues in this
+repository are for the driver: parsing, sysfs and ABI behavior, kernel
+integration, and packaging.
+
 ## MCU Firmware Capability Policy
 
 The driver treats firmware behavior as runtime-observed capability or quirk
@@ -24,14 +51,87 @@ detection, not as a static firmware-version allowlist or denylist.
   not trusted by current driver releases. `energy_full` remains the static
   device-tree design capacity, `energy_now` is not exported, and fan auto-speed
   restoration requires the documented workarounds.
+- **Status LED and beeper**: the driver reports the state from the PMU's last
+  `STATUS_LED_BEEPER_V2_SET_ACK`, so a refused write is visible as a readback
+  that reverts. Some firmware ignores the set command entirely and reports a
+  constant state, which leaves both attributes uncontrollable.
 
-Observed RTC results are evidence for diagnostics, not feature gates:
+Observed per-firmware results are evidence for diagnostics, not feature gates:
 
-| Firmware version | Observed RTC result |
-|------------------|---------------------|
-| `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. |
-| `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
-| `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. |
+| Firmware version | RTC and scheduled boot | Status LED and beeper control |
+|------------------|------------------------|-------------------------------|
+| `RA2E1250815002` | Promotes to `enabled-probe`; scheduled boot works. | Ignored; the PMU acknowledges state `0x01` whatever is requested. |
+| `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. |
+| `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
+| `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
+| `RA2E1260730001` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
+
+`RA2E1260730001` has no observations because it never survives a flash. See
+[MCU Firmware `RA2E1260730001` Does Not Persist](#mcu-firmware-ra2e1260730001-does-not-persist).
+
+Fan auto-speed reset is not per-firmware: no tested version exposes a trusted
+API for it, so it stays a prose caution under [Fan Control](#fan-control)
+rather than a column here.
+
+`pmu_hw_version` is reported by the running MCU firmware, not read from a
+board-independent identifier. The same board reported `NT2421A4` under
+`RA2E1260515000` and `NT2421A3` under `RA2E1250815002`. Treat
+`pmu_hw_version` as a firmware-reported string, not as a stable board
+revision.
+
+## MCU Firmware `RA2E1260730001` Does Not Persist
+
+The vendor manifest
+(`https://dl.photonicat.com/firmware/pcat2_mcu/latest_img.json`) published
+`RA2E1260730001` on 2026-07-30, matching the Photonicat 2 OpenWrt `r7853`
+release. As of 2026-08-08 the same package is also served at the fixed
+`https://dl.photonicat.com/firmware/pcat2_mcu/ota.bin` URL, so that URL is not
+a source of older firmware despite being described elsewhere as a rollback
+image.
+
+Both URLs are mutable. The package tested here, observed on 2026-08-08, is:
+
+| Field | Value |
+|-------|-------|
+| Manifest version | `RA2E1260730001` |
+| Manifest filename | `ota_RA2E120260730001000.bin` |
+| SHA256 | `e5db214ea08dd9cee04adc86204030634d695d3bd5067a0bbcf71b5b655506dd` |
+| Wrapped size | 63816 bytes |
+| Payload size | 63304 bytes |
+| Payload CRC32 | `5a5d0144` |
+
+That package downloads and validates correctly (manifest SHA256, `ARBDPHC2`
+magic, `RA2E1` version, payload size, CRC32), and the upstream
+`pcat-pmu-updater` streams it to 100% and prints
+`PMU firmware updated successfully.` before powering the system off. The PMU
+then restarts the board on its own and reports `RA2E1250815002` — an older
+2025-08-15 build — instead of the flashed version.
+
+Observed on this driver:
+
+| Version before flash | Version after flash |
+|----------------------|---------------------|
+| `RA2E1260515000` | `RA2E1250815002` |
+| `RA2E1250815002` | `RA2E1250815002` |
+
+The same rollback has been reported independently on the vendor OpenWrt image
+using the vendor's own `pcat-pmu-updater`, flashing the same package from
+`RA2E1260702000`. The rollback is therefore an MCU-side behavior of
+`RA2E1260730001`, not a fault in this driver's raw control path: the updater's
+`--pmu-fw-version-get` query, the `0xCB`/`0xCD`/`0xD3`/`0xCF` update sequence,
+and the success acknowledgement all complete through `/dev/pcat-pm-ctl`.
+
+Do not treat a successful `pcat-pmu-updater` run as proof of an applied
+update. Always re-read the version after the board comes back up:
+
+```bash
+cat /sys/kernel/photonicat-pm/pmu_fw_version
+sudo pcat-pmu-updater --pmu-fw-version-get
+```
+
+Because `ota.bin` now serves `RA2E1260730001`, there is no published rollback
+path back to `RA2E1260515000`; a board that lands on `RA2E1250815002` stays
+there unless an older package is recovered from a prior OpenWrt image.
 
 ## Features
 
@@ -85,6 +185,33 @@ device-tree OCV capacity table as fallback.
 | `/sys/kernel/photonicat-pm/net_status_led_off_time` | Network status LED off time in milliseconds (read-write, 0–65535). |
 | `/sys/kernel/photonicat-pm/net_status_led_repeat` | Network status LED repeat count (read-write, 0–65535). 0 = infinite. |
 | `/sys/kernel/photonicat-pm/movement_trigger` | Accelerometer-based motion detection (read-only). Returns 1 if motion detected, 0 otherwise. |
+
+> [!CAUTION]
+> Known affected firmware: `RA2E1250815002`.
+> The PMU ignores `STATUS_LED_BEEPER_V2_SET` (`0x9B`). Whatever state the
+> driver requests, the PMU answers `STATUS_LED_BEEPER_V2_SET_ACK` (`0x9C`)
+> with a constant payload of `0x01`: status LED bit set, beeper bit clear.
+> Requesting the LED off and requesting the beeper on are both refused, so
+> neither `status_led` nor `beeper` is controllable on this firmware.
+>
+> Because the acknowledged beeper bit is stuck at 0, `beeper` reads 0 while
+> the board still beeps audibly. A 0 here means the PMU reported 0, not that
+> the beeper is silent.
+>
+> `0x9B` is the only status LED and beeper command in the protocol; there is
+> no earlier variant to fall back to. This driver builds the state byte and
+> parses the acknowledgement exactly as the vendor manager does. Whether the
+> acknowledged byte is a state or a result code is unsettled: the vendor
+> stores it as state bits but logs it as `PMU IO operation status`. Under
+> either reading the requested state is not applied.
+>
+> Per-firmware results are in
+> [MCU Firmware Capability Policy](#mcu-firmware-capability-policy).
+
+`status_led` and `beeper` reads report the state from the PMU's last ACK, not
+the value last written. A read issued immediately after a write returns the
+requested value because the ACK has not arrived yet; wait about a second
+before reading back a confirmed state.
 
 ### PMU Information
 
@@ -357,9 +484,13 @@ echo 1 > /sys/kernel/photonicat-pm/status_led
 # Turn off status LED
 echo 0 > /sys/kernel/photonicat-pm/status_led
 
-# Read current status LED state
+# Read current status LED state, once the PMU ACK has landed
+sleep 1
 cat /sys/kernel/photonicat-pm/status_led
 ```
+
+On firmware that refuses the write, the read returns 1 again after the ACK.
+See the caution under [LEDs & Peripherals](#leds--peripherals).
 
 ### Beeper Control
 
@@ -370,9 +501,14 @@ echo 1 > /sys/kernel/photonicat-pm/beeper
 # Turn off beeper
 echo 0 > /sys/kernel/photonicat-pm/beeper
 
-# Read current beeper state
+# Read current beeper state, once the PMU ACK has landed
+sleep 1
 cat /sys/kernel/photonicat-pm/beeper
 ```
+
+On firmware that ignores the set command, the read returns the PMU's constant
+state instead of the requested one. See the caution under
+[LEDs & Peripherals](#leds--peripherals).
 
 ### PMU Hardware / Firmware Version
 
