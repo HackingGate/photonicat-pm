@@ -56,11 +56,24 @@ revision.
 The vendor manifest
 (`https://dl.photonicat.com/firmware/pcat2_mcu/latest_img.json`) published
 `RA2E1260730001` on 2026-07-30, matching the Photonicat 2 OpenWrt `r7853`
-release. The same package is served at the fixed
-`https://dl.photonicat.com/firmware/pcat2_mcu/ota.bin` rollback URL.
+release. As of 2026-08-08 the same package is also served at the fixed
+`https://dl.photonicat.com/firmware/pcat2_mcu/ota.bin` URL, so that URL is not
+a source of older firmware despite being described elsewhere as a rollback
+image.
+
+Both URLs are mutable. The package tested here, observed on 2026-08-08, is:
+
+| Field | Value |
+|-------|-------|
+| Manifest version | `RA2E1260730001` |
+| Manifest filename | `ota_RA2E120260730001000.bin` |
+| SHA256 | `e5db214ea08dd9cee04adc86204030634d695d3bd5067a0bbcf71b5b655506dd` |
+| Wrapped size | 63816 bytes |
+| Payload size | 63304 bytes |
+| Payload CRC32 | `5a5d0144` |
 
 That package downloads and validates correctly (manifest SHA256, `ARBDPHC2`
-magic, `RA2E1` version, 63304-byte payload, CRC32 `5a5d0144`), and the upstream
+magic, `RA2E1` version, payload size, CRC32), and the upstream
 `pcat-pmu-updater` streams it to 100% and prints
 `PMU firmware updated successfully.` before powering the system off. The PMU
 then restarts the board on its own and reports `RA2E1250815002` — an older
