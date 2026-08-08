@@ -198,6 +198,13 @@ device-tree OCV capacity table as fallback.
 > the board still beeps audibly. A 0 here means the PMU reported 0, not that
 > the beeper is silent.
 >
+> `0x9B` is the only status LED and beeper command in the protocol; there is
+> no earlier variant to fall back to. This driver builds the state byte and
+> parses the acknowledgement exactly as the vendor manager does. Whether the
+> acknowledged byte is a state or a result code is unsettled: the vendor
+> stores it as state bits but logs it as `PMU IO operation status`. Under
+> either reading the requested state is not applied.
+>
 > Per-firmware results are in
 > [MCU Firmware Capability Policy](#mcu-firmware-capability-policy).
 
