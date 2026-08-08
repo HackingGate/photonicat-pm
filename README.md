@@ -24,6 +24,9 @@ detection, not as a static firmware-version allowlist or denylist.
   not trusted by current driver releases. `energy_full` remains the static
   device-tree design capacity, `energy_now` is not exported, and fan auto-speed
   restoration requires the documented workarounds.
+- **Status LED and beeper**: the driver reports the state from the PMU's last
+  `STATUS_LED_BEEPER_V2_SET_ACK`, so a refused write is visible as a readback
+  that reverts. Some firmware refuses to turn the status LED off.
 
 Observed RTC results are evidence for diagnostics, not feature gates:
 
@@ -134,6 +137,27 @@ device-tree OCV capacity table as fallback.
 | `/sys/kernel/photonicat-pm/net_status_led_off_time` | Network status LED off time in milliseconds (read-write, 0–65535). |
 | `/sys/kernel/photonicat-pm/net_status_led_repeat` | Network status LED repeat count (read-write, 0–65535). 0 = infinite. |
 | `/sys/kernel/photonicat-pm/movement_trigger` | Accelerometer-based motion detection (read-only). Returns 1 if motion detected, 0 otherwise. |
+
+> [!CAUTION]
+> Known affected firmware: `RA2E1250815002`.
+> The PMU refuses to turn the status LED off. The driver sends
+> `STATUS_LED_BEEPER_V2_SET` (`0x9B`) with the LED bit clear, and the PMU
+> answers `STATUS_LED_BEEPER_V2_SET_ACK` (`0x9C`) with the LED bit still set.
+> Beeper control on the same command is honored.
+
+Observed status LED results:
+
+| Firmware version | Observed status LED result |
+|------------------|----------------------------|
+| `RA2E1250815002` | Write of 0 refused; PMU ACK reports the LED still enabled. |
+| `RA2E1250918000` | Write of 0 honored. |
+| `RA2E1260306000` | Write of 0 honored. |
+| `RA2E1260515000` | Write of 0 honored. |
+
+`status_led` and `beeper` reads report the state from the PMU's last ACK, not
+the value last written. A read issued immediately after a write returns the
+requested value because the ACK has not arrived yet; wait about a second
+before reading back a confirmed state.
 
 ### PMU Information
 
@@ -406,9 +430,13 @@ echo 1 > /sys/kernel/photonicat-pm/status_led
 # Turn off status LED
 echo 0 > /sys/kernel/photonicat-pm/status_led
 
-# Read current status LED state
+# Read current status LED state, once the PMU ACK has landed
+sleep 1
 cat /sys/kernel/photonicat-pm/status_led
 ```
+
+On firmware that refuses the write, the read returns 1 again after the ACK.
+See the caution under [LEDs & Peripherals](#leds--peripherals).
 
 ### Beeper Control
 
