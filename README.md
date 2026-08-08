@@ -7,6 +7,26 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 See the [Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki)
 for MCU firmware inspection and flashing workflows.
 
+## Scope
+
+This project is an independent Linux kernel driver. It is the host side of the
+UART link only. It does not build, sign, package, or distribute MCU firmware,
+and it cannot change how the MCU behaves once a command reaches it.
+
+The MCU firmware is closed source. There is no published source, protocol
+specification, or command reference for it. Every protocol detail in this
+repository — command numbers, payload layouts, and the per-firmware behavior
+recorded below — comes from observing the wire, not from vendor documentation.
+Expect gaps, and expect behavior to change between firmware versions without
+notice.
+
+Firmware defects are therefore outside what this driver can fix. A PMU that
+ignores a command, reports a broken clock, or rolls back an update is behaving
+that way before the driver sees the response. Such behavior is documented here
+so users can recognize it, and should be reported to the vendor. Issues in this
+repository are for the driver: parsing, sysfs and ABI behavior, kernel
+integration, and packaging.
+
 ## MCU Firmware Capability Policy
 
 The driver treats firmware behavior as runtime-observed capability or quirk
