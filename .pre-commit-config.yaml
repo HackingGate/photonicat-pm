@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -10,6 +10,16 @@ repos:
       - id: detect-private-key
   - repo: local
     hooks:
+      - id: lint-manpages
+        name: man pages render without groff warnings
+        entry: scripts/lint-manpages.sh
+        language: script
+        files: '^doc/.*\.[0-9]$'
+      - id: check-md-anchors
+        name: markdown in-document anchors resolve
+        entry: scripts/check-md-anchors.py
+        language: script
+        files: '\.md$'
       - id: lintian-docker
         name: lintian (docker)
         entry: docker compose up --build --exit-code-from lint

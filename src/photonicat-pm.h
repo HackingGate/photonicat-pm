@@ -703,7 +703,7 @@ int pcat_pm_hwmon_probe(struct pcat_pm_data *pm_data);
  * WARNING: The PMU uses unmanaged fan speed by default. Once any fan speed is
  * set via this cooling device, DT thermal policy, or other software,
  * the PMU switches to managed fan speed.
- * See pcat-pm-fan.c and the README Fan Control section for MCU auto-speed
+ * See pcat-pm-fan.c and the README Fan Control section for PMU auto-speed
  * reset limitations and restore workarounds.
  *
  * Return: 0 on success, negative error otherwise

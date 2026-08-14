@@ -11,8 +11,18 @@ photonicat-pm (1.0.5-1) unstable; urgency=medium
     /dev/pcat-pm-ctl so the exported state cannot drift from the PMU.
   * Document that RA2E1260702000 refuses VOLTAGE_THRESHOLD_SET for every
     payload tested, so the driver does not send it.
+  * Strip duplicated and low-information text from README.md and
+    pcat-pm-ctl(4), and say PMU firmware consistently where the docs
+    previously alternated with MCU firmware.
+  * Fix pcat-pm-ctl(4) rendering a literal backslash in the
+    force-poweroff-timeout ranges, and correct the examples for the status
+    LED acknowledgment delay and the network LED repeat count.
+  * Point the frame-format cross-references at the README protocol section
+    rather than the man page, which documents command definitions instead.
+  * Check man page rendering and README anchors from pre-commit, and track
+    pre-commit hook revisions with dependabot.
 
- -- HackingGate <i@hackinggate.com>  Fri, 14 Aug 2026 23:04:32 +0900
+ -- HackingGate <i@hackinggate.com>  Fri, 14 Aug 2026 23:44:05 +0900
 
 photonicat-pm (1.0.4-1) unstable; urgency=medium
 

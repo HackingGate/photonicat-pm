@@ -11,4 +11,8 @@ updates:
   package-ecosystem: "docker-compose"
   schedule:
     interval: "weekly"
+- directory: "/"
+  package-ecosystem: "pre-commit"
+  schedule:
+    interval: "weekly"
 version: 2
