@@ -78,6 +78,10 @@
  * @PCAT_PM_COMMAND_HOST_REQUEST_SHUTDOWN_ACK: Host shutdown acknowledgment
  * @PCAT_PM_COMMAND_WATCHDOG_TIMEOUT_SET: Set watchdog timeout values
  * @PCAT_PM_COMMAND_WATCHDOG_TIMEOUT_SET_ACK: Watchdog timeout acknowledgment
+ * @PCAT_PM_COMMAND_VOLTAGE_THRESHOLD_SET: Set the nine PMU voltage thresholds
+ * @PCAT_PM_COMMAND_VOLTAGE_THRESHOLD_SET_ACK: Voltage threshold set status
+ * @PCAT_PM_COMMAND_POWER_ON_MODE_V2_SET: Set or query power-on mode
+ * @PCAT_PM_COMMAND_POWER_ON_MODE_V2_SET_ACK: Power-on mode status or state
  * @PCAT_PM_COMMAND_CHARGER_ON_AUTO_START: Configure charger auto-start
  * @PCAT_PM_COMMAND_CHARGER_ON_AUTO_START_ACK: Charger config acknowledgment
  * @PCAT_PM_COMMAND_NET_STATUS_LED_SETUP: Configure network status LED
@@ -90,6 +94,10 @@
  * @PCAT_PM_COMMAND_DEVICE_MOVEMENT_ACK: Movement detection acknowledgment
  * @PCAT_PM_COMMAND_STATUS_LED_BEEPER_V2_SET: Set/get status LED and beeper state
  * @PCAT_PM_COMMAND_STATUS_LED_BEEPER_V2_SET_ACK: LED/beeper state response
+ * @PCAT_PM_COMMAND_CHARGE_THRESHOLD_SET: Set charge stop threshold (50-100%)
+ * @PCAT_PM_COMMAND_CHARGE_THRESHOLD_SET_ACK: Charge threshold set status
+ * @PCAT_PM_COMMAND_CHARGE_THRESHOLD_GET: Request charge stop threshold
+ * @PCAT_PM_COMMAND_CHARGE_THRESHOLD_GET_ACK: Charge threshold response
  *
  * These commands are used for communication between the host and the PMU
  * over a serial (UART) connection. The protocol uses a framed format with
@@ -116,6 +124,11 @@ typedef enum {
 	PCAT_PM_COMMAND_WATCHDOG_TIMEOUT_SET_ACK = 0x14,
 	PCAT_PM_COMMAND_CHARGER_ON_AUTO_START = 0x15,
 	PCAT_PM_COMMAND_CHARGER_ON_AUTO_START_ACK = 0x16,
+	/* Refused by every tested firmware, so the driver does not send it.
+	 * Kept for protocol documentation and raw /dev/pcat-pm-ctl users.
+	 */
+	PCAT_PM_COMMAND_VOLTAGE_THRESHOLD_SET = 0x17,
+	PCAT_PM_COMMAND_VOLTAGE_THRESHOLD_SET_ACK = 0x18,
 	PCAT_PM_COMMAND_NET_STATUS_LED_SETUP = 0x19,
 	PCAT_PM_COMMAND_NET_STATUS_LED_SETUP_ACK = 0x1A,
 	PCAT_PM_COMMAND_POWER_ON_EVENT_GET = 0x1B,
@@ -126,7 +139,90 @@ typedef enum {
 	PCAT_PM_COMMAND_STATUS_LED_BEEPER_V2_SET_ACK = 0x9C,
 	PCAT_PM_COMMAND_DEVICE_MOVEMENT = 0x95,
 	PCAT_PM_COMMAND_DEVICE_MOVEMENT_ACK = 0x96,
+	PCAT_PM_COMMAND_POWER_ON_MODE_V2_SET = 0xA1,
+	PCAT_PM_COMMAND_POWER_ON_MODE_V2_SET_ACK = 0xA2,
+	PCAT_PM_COMMAND_CHARGE_THRESHOLD_SET = 0xA5,
+	PCAT_PM_COMMAND_CHARGE_THRESHOLD_SET_ACK = 0xA6,
+	PCAT_PM_COMMAND_CHARGE_THRESHOLD_GET = 0xA7,
+	PCAT_PM_COMMAND_CHARGE_THRESHOLD_GET_ACK = 0xA8,
 } PCatPMCommandType;
+
+/**
+ * PCAT_PM_CHARGE_THRESHOLD_MIN - Lowest charge stop threshold accepted by the PMU
+ * PCAT_PM_CHARGE_THRESHOLD_MAX - Highest charge stop threshold accepted by the PMU
+ *
+ * The PMU rejects values outside this range with a non-zero ACK status and
+ * keeps the previously stored threshold.
+ */
+#define PCAT_PM_CHARGE_THRESHOLD_MIN 50
+#define PCAT_PM_CHARGE_THRESHOLD_MAX 100
+
+/**
+ * PCAT_PM_POWER_ON_MODE_ENABLED - Power-on mode value that enables auto power-on
+ * PCAT_PM_POWER_ON_MODE_DISABLED: Power-on mode value that disables auto power-on
+ * PCAT_PM_POWER_ON_MODE_QUERY: Payload that requests the current mode
+ * PCAT_PM_POWER_ON_MODE_STATE_FLAG: Flag set in ACKs that report a mode
+ *
+ * The PMU accepts only %PCAT_PM_POWER_ON_MODE_ENABLED and
+ * %PCAT_PM_POWER_ON_MODE_DISABLED as set values, and answers a query with
+ * %PCAT_PM_POWER_ON_MODE_STATE_FLAG or-ed with the stored mode. Firmware that
+ * has never been configured reports the flag alone, a state that cannot be
+ * restored once either mode has been set.
+ */
+#define PCAT_PM_POWER_ON_MODE_ENABLED 0x01
+#define PCAT_PM_POWER_ON_MODE_DISABLED 0x02
+#define PCAT_PM_POWER_ON_MODE_QUERY 0xFF
+#define PCAT_PM_POWER_ON_MODE_STATE_FLAG 0x80
+
+/**
+ * PCAT_PM_CMD_ACK_TIMEOUT_MS - Default wait for a PMU command acknowledgment
+ */
+#define PCAT_PM_CMD_ACK_TIMEOUT_MS 1000
+
+/**
+ * enum pcat_pm_probe_capability - Runtime probe state of a PMU feature
+ * @PCAT_PM_PROBE_CAP_PENDING: The PMU has not answered for this feature yet
+ * @PCAT_PM_PROBE_CAP_ENABLED: The PMU answered, so the feature is usable
+ */
+enum pcat_pm_probe_capability {
+	PCAT_PM_PROBE_CAP_PENDING = 0,
+	PCAT_PM_PROBE_CAP_ENABLED,
+};
+
+static inline bool pcat_pm_probe_capability_enabled(
+	enum pcat_pm_probe_capability capability)
+{
+	return capability == PCAT_PM_PROBE_CAP_ENABLED;
+}
+
+static inline const char *pcat_pm_probe_capability_name(
+	enum pcat_pm_probe_capability capability)
+{
+	switch (capability) {
+	case PCAT_PM_PROBE_CAP_PENDING:
+		return "pending-probe";
+	case PCAT_PM_PROBE_CAP_ENABLED:
+		return "enabled-probe";
+	default:
+		return "unknown";
+	}
+}
+
+/**
+ * struct pcat_pm_cmd_ack - Acknowledgment state of a synchronous PMU command
+ * @cmd_mutex: Serializes senders of the command
+ * @wait: Wait queue woken when a matching ACK arrives
+ * @frame: Frame number of the last recorded ACK
+ * @status: Status byte of the last recorded ACK (0 = accepted)
+ * @seen: An ACK has been recorded since the last send
+ */
+struct pcat_pm_cmd_ack {
+	struct mutex cmd_mutex;
+	wait_queue_head_t wait;
+	u16 frame;
+	u8 status;
+	bool seen;
+};
 
 enum pcat_pm_rtc_capability {
 	PCAT_PM_RTC_CAP_PENDING_PROBE = 0,
@@ -154,6 +250,8 @@ static inline const char *pcat_pm_rtc_capability_name(
 
 struct pcat_pm_fw_caps {
 	enum pcat_pm_rtc_capability rtc_capability;
+	enum pcat_pm_probe_capability charge_threshold_capability;
+	enum pcat_pm_probe_capability power_on_mode_capability;
 };
 
 /**
@@ -206,6 +304,10 @@ struct pcat_pm_fw_caps {
  * @on_battery: True if running on battery power
  * @on_charger: True if charger is connected
  * @ps_initialized: True after first parsed PMU status report
+ * @charge_threshold_ack: ACK state of the charge threshold set command
+ * @charge_threshold: Charge stop threshold reported by the PMU (50-100%)
+ * @power_on_mode_ack: ACK state of the power-on mode set command
+ * @power_on_mode_state: Power-on mode reported by the PMU (0x80, 0x81, 0x82)
  * @board_temp: Motherboard temperature in degrees Celsius
  * @gs_x: Accelerometer X-axis value
  * @gs_y: Accelerometer Y-axis value
@@ -303,6 +405,14 @@ struct pcat_pm_data {
 	bool on_battery;
 	bool on_charger;
 	bool ps_initialized;
+
+	/* Charge stop threshold (value protected by @mutex) */
+	struct pcat_pm_cmd_ack charge_threshold_ack;
+	u8 charge_threshold;
+
+	/* Power-on mode (state protected by @mutex) */
+	struct pcat_pm_cmd_ack power_on_mode_ack;
+	u8 power_on_mode_state;
 
 	/* Sensor data */
 	int board_temp;
@@ -433,6 +543,42 @@ static inline int pcat_pm_uart_write_data(struct pcat_pm_data *pm_data,
 }
 
 /**
+ * pcat_pm_cmd_ack_init - Initialize acknowledgment state of a PMU command
+ * @ack: Acknowledgment state
+ */
+void pcat_pm_cmd_ack_init(struct pcat_pm_cmd_ack *ack);
+
+/**
+ * pcat_pm_cmd_ack_record - Record an acknowledgment received from the PMU
+ * @pm_data: Driver data
+ * @ack: Acknowledgment state to update
+ * @frame_num: Frame number of the acknowledgment
+ * @status: Status byte reported by the PMU (0 = accepted)
+ *
+ * Wakes a sender blocked in pcat_pm_cmd_send_wait().
+ */
+void pcat_pm_cmd_ack_record(struct pcat_pm_data *pm_data,
+	struct pcat_pm_cmd_ack *ack, u16 frame_num, u8 status);
+
+/**
+ * pcat_pm_cmd_send_wait - Send a PMU command and wait for its acknowledgment
+ * @pm_data: Driver data
+ * @ack: Acknowledgment state of this command
+ * @command: Command type to send
+ * @extra_data: Optional payload
+ * @extra_data_len: Payload length
+ * @timeout_ms: Milliseconds to wait for the acknowledgment
+ *
+ * Serializes senders of @command, so only one waits for a given ACK at a time.
+ *
+ * Return: 0 if the PMU accepted the command, -EIO if it refused, -ETIMEDOUT if
+ * it did not answer, or a negative error from the serial write.
+ */
+int pcat_pm_cmd_send_wait(struct pcat_pm_data *pm_data,
+	struct pcat_pm_cmd_ack *ack, u16 command, const u8 *extra_data,
+	u16 extra_data_len, unsigned int timeout_ms);
+
+/**
  * pcat_pm_uart_receive_parse - Parse received UART data
  * @pm_data: Driver data
  * @buffer: Receive buffer
@@ -491,6 +637,28 @@ int pcat_pm_charger_probe(struct pcat_pm_data *pm_data);
  * @pm_data: Driver data
  */
 void pcat_pm_charger_remove(struct pcat_pm_data *pm_data);
+
+/**
+ * pcat_pm_charge_threshold_query - Ask the PMU for its charge stop threshold
+ * @pm_data: Driver data
+ *
+ * Sends CHARGE_THRESHOLD_GET. A valid reply caches the threshold and promotes
+ * @pmu_fw_caps.charge_threshold_capability to enabled-probe. Firmware without
+ * charge threshold support does not answer, so the capability stays pending.
+ */
+void pcat_pm_charge_threshold_query(struct pcat_pm_data *pm_data);
+
+
+/**
+ * pcat_pm_charge_threshold_report - Record a threshold value read from the PMU
+ * @pm_data: Driver data
+ * @threshold: Threshold percentage reported by the PMU
+ *
+ * Out-of-range values are ignored. A valid value promotes the runtime
+ * capability to enabled-probe.
+ */
+void pcat_pm_charge_threshold_report(struct pcat_pm_data *pm_data,
+	u8 threshold);
 
 /* ========================================================================
  * RTC Module (pcat-pm-rtc.c)
@@ -577,12 +745,29 @@ void pcat_pm_ctl_cmd_exec(struct pcat_pm_data *pm_data,
  *
  * Creates /sys/kernel/photonicat-pm/ with sysfs attributes for:
  * movement detection, status LED, beeper, PMU hardware/firmware version,
- * PMU RTC capability, power-on event, network status LED, and charger
- * auto-start.
+ * PMU RTC and charge threshold capability, power-on event, network status
+ * LED, and charger auto-start.
  *
  * Return: 0 on success, negative error otherwise
  */
 int pcat_pm_sysfs_init(struct pcat_pm_data *pm_data);
+
+/**
+ * pcat_pm_power_on_mode_query - Ask the PMU for its power-on mode
+ * @pm_data: Driver data
+ *
+ * A reply caches the mode and promotes
+ * @pmu_fw_caps.power_on_mode_capability to enabled-probe.
+ */
+void pcat_pm_power_on_mode_query(struct pcat_pm_data *pm_data);
+
+/**
+ * pcat_pm_power_on_mode_report - Record a power-on mode reported by the PMU
+ * @pm_data: Driver data
+ * @state: Mode byte from the PMU (%PCAT_PM_POWER_ON_MODE_STATE_FLAG or-ed
+ *         with the stored mode)
+ */
+void pcat_pm_power_on_mode_report(struct pcat_pm_data *pm_data, u8 state);
 
 /**
  * pcat_pm_sysfs_cleanup - Remove sysfs attributes and kobject

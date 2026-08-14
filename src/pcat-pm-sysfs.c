@@ -123,6 +123,32 @@ static ssize_t pmu_rtc_capability_show(struct kobject *kobj,
 		pcat_pm_rtc_capability_name(capability));
 }
 
+static ssize_t pmu_charge_threshold_capability_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	struct pcat_pm_data *pm_data;
+	enum pcat_pm_probe_capability capability;
+
+	pm_data = container_of(kobj, struct pcat_pm_data, kobject);
+	capability = READ_ONCE(pm_data->pmu_fw_caps.charge_threshold_capability);
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n",
+		pcat_pm_probe_capability_name(capability));
+}
+
+static ssize_t pmu_power_on_mode_capability_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	struct pcat_pm_data *pm_data;
+	enum pcat_pm_probe_capability capability;
+
+	pm_data = container_of(kobj, struct pcat_pm_data, kobject);
+	capability = READ_ONCE(pm_data->pmu_fw_caps.power_on_mode_capability);
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n",
+		pcat_pm_probe_capability_name(capability));
+}
+
 static ssize_t power_on_event_show(struct kobject *kobj,
 	struct kobj_attribute *attr, char *buf)
 {
@@ -277,6 +303,112 @@ static ssize_t charger_on_auto_start_store(struct kobject *kobj,
 	return count;
 }
 
+static const char *pcat_pm_power_on_mode_name(u8 state)
+{
+	switch (state) {
+	case PCAT_PM_POWER_ON_MODE_STATE_FLAG:
+		return "unconfigured";
+	case PCAT_PM_POWER_ON_MODE_STATE_FLAG | PCAT_PM_POWER_ON_MODE_ENABLED:
+		return "enabled";
+	case PCAT_PM_POWER_ON_MODE_STATE_FLAG | PCAT_PM_POWER_ON_MODE_DISABLED:
+		return "disabled";
+	default:
+		return "unknown";
+	}
+}
+
+void pcat_pm_power_on_mode_query(struct pcat_pm_data *pm_data)
+{
+	u8 query = PCAT_PM_POWER_ON_MODE_QUERY;
+
+	pcat_pm_uart_write_data(pm_data, PCAT_PM_COMMAND_POWER_ON_MODE_V2_SET,
+		&query, 1, true, 0);
+}
+
+void pcat_pm_power_on_mode_report(struct pcat_pm_data *pm_data, u8 state)
+{
+	bool promoted = false;
+
+	mutex_lock(&pm_data->mutex);
+	pm_data->power_on_mode_state = state;
+	if (pm_data->pmu_fw_caps.power_on_mode_capability !=
+	    PCAT_PM_PROBE_CAP_ENABLED) {
+		pm_data->pmu_fw_caps.power_on_mode_capability =
+			PCAT_PM_PROBE_CAP_ENABLED;
+		promoted = true;
+	}
+	mutex_unlock(&pm_data->mutex);
+
+	if (promoted)
+		dev_info(&pm_data->serdev->dev,
+			"PMU power-on mode enabled after runtime validation (%s).\n",
+			pcat_pm_power_on_mode_name(state));
+}
+
+static ssize_t power_on_mode_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	struct pcat_pm_data *pm_data;
+	u8 state;
+
+	pm_data = container_of(kobj, struct pcat_pm_data, kobject);
+
+	if (!pcat_pm_probe_capability_enabled(
+		READ_ONCE(pm_data->pmu_fw_caps.power_on_mode_capability)))
+		return -ENODATA;
+
+	mutex_lock(&pm_data->mutex);
+	state = pm_data->power_on_mode_state;
+	mutex_unlock(&pm_data->mutex);
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n",
+		pcat_pm_power_on_mode_name(state));
+}
+
+static ssize_t power_on_mode_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct pcat_pm_data *pm_data;
+	bool enable;
+	u8 mode;
+	int ret;
+
+	pm_data = container_of(kobj, struct pcat_pm_data, kobject);
+
+	if (sysfs_streq(buf, "enabled")) {
+		enable = true;
+	} else if (sysfs_streq(buf, "disabled")) {
+		enable = false;
+	} else {
+		ret = kstrtobool(buf, &enable);
+		if (ret)
+			return ret;
+	}
+
+	mode = enable ? PCAT_PM_POWER_ON_MODE_ENABLED :
+		PCAT_PM_POWER_ON_MODE_DISABLED;
+
+	ret = pcat_pm_cmd_send_wait(pm_data, &pm_data->power_on_mode_ack,
+		PCAT_PM_COMMAND_POWER_ON_MODE_V2_SET, &mode, 1,
+		PCAT_PM_CMD_ACK_TIMEOUT_MS);
+	if (ret) {
+		if (ret == -EIO)
+			dev_err(&pm_data->serdev->dev,
+				"Failed to set power-on mode %u.\n", mode);
+		return ret;
+	}
+
+	/* The set ACK carries a status byte only. Record the accepted mode so
+	 * a read straight after the write does not report the previous state,
+	 * then query the PMU so its own answer still has the last word.
+	 */
+	pcat_pm_power_on_mode_report(pm_data,
+		PCAT_PM_POWER_ON_MODE_STATE_FLAG | mode);
+	pcat_pm_power_on_mode_query(pm_data);
+
+	return count;
+}
+
 static ssize_t fan_state_show(struct kobject *kobj,
 	struct kobj_attribute *attr, char *buf)
 {
@@ -312,8 +444,19 @@ static struct kobj_attribute pcat_pm_sysfs_pmu_fw_version_attribute =
 static struct kobj_attribute pcat_pm_sysfs_pmu_rtc_capability_attribute =
 	__ATTR_RO(pmu_rtc_capability);
 
+static struct kobj_attribute
+	pcat_pm_sysfs_pmu_charge_threshold_capability_attribute =
+	__ATTR_RO(pmu_charge_threshold_capability);
+
+static struct kobj_attribute
+	pcat_pm_sysfs_pmu_power_on_mode_capability_attribute =
+	__ATTR_RO(pmu_power_on_mode_capability);
+
 static struct kobj_attribute pcat_pm_sysfs_power_on_event_attribute =
 	__ATTR_RO(power_on_event);
+
+static struct kobj_attribute pcat_pm_sysfs_power_on_mode_attribute =
+	__ATTR_RW(power_on_mode);
 
 static struct kobj_attribute pcat_pm_sysfs_net_status_led_on_time_attribute =
 	__ATTR_RW(net_status_led_on_time);
@@ -337,7 +480,10 @@ static struct attribute *pcat_pm_sysfs_attrs[] = {
 	&pcat_pm_sysfs_pmu_hw_version_attribute.attr,
 	&pcat_pm_sysfs_pmu_fw_version_attribute.attr,
 	&pcat_pm_sysfs_pmu_rtc_capability_attribute.attr,
+	&pcat_pm_sysfs_pmu_charge_threshold_capability_attribute.attr,
+	&pcat_pm_sysfs_pmu_power_on_mode_capability_attribute.attr,
 	&pcat_pm_sysfs_power_on_event_attribute.attr,
+	&pcat_pm_sysfs_power_on_mode_attribute.attr,
 	&pcat_pm_sysfs_net_status_led_on_time_attribute.attr,
 	&pcat_pm_sysfs_net_status_led_off_time_attribute.attr,
 	&pcat_pm_sysfs_net_status_led_repeat_attribute.attr,

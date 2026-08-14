@@ -53,6 +53,33 @@ remains the static device-tree design capacity,
 .B energy_now
 is not exported, and fan auto-speed restoration requires the documented
 workarounds.
+.TP
+.B Power-on mode
+Starts as
+.BR pending-probe .
+The driver queries the PMU on load, and any answer promotes
+.B pmu_power_on_mode_capability
+to
+.BR enabled-probe .
+.B power_on_mode
+reads
+.B ENODATA
+while the capability is pending.
+.TP
+.B Charge stop threshold
+Starts as
+.BR pending-probe .
+The driver queries the PMU on load; a reply in the 50\-100 range caches the
+value and promotes
+.B pmu_charge_threshold_capability
+to
+.BR enabled-probe .
+.B charge_control_end_threshold
+reads
+.B ENODATA
+while the capability is pending. Writes are not gated on the probe: firmware
+without support does not answer, so the write fails with
+.BR ETIMEDOUT .
 .PP
 Observed RTC results are evidence for diagnostics, not feature gates:
 .TP
@@ -93,6 +120,20 @@ device-tree node, not PMU-measured full capacity;
 is not exported by current releases.
 .B power_now
 is computed from PMU voltage and current, not from PMU energy fields.
+.TP
+.B /sys/class/power_supply/battery/charge_control_end_threshold
+Charge stop threshold in percent (read-write, 50\-100). The PMU stores and
+enforces the threshold, so it survives driver reload and reboot. Values
+outside the range are rejected with
+.B EINVAL
+before any command is sent, a PMU refusal returns
+.BR EIO ,
+and firmware without charge threshold support returns
+.BR ETIMEDOUT .
+Raw
+.B CHARGE_THRESHOLD_SET
+frames written to this device are not forwarded, so the exported value cannot
+drift from the PMU state; use this attribute instead.
 .TP
 .B /sys/class/power_supply/charger/
 Charger online status and input voltage (read-only).
@@ -198,6 +239,18 @@ PMU RTC policy state (read-only). Values:
 or
 .BR enabled-probe .
 .TP
+.B /sys/kernel/photonicat-pm/pmu_charge_threshold_capability
+PMU charge threshold policy state (read-only). Values:
+.BR pending-probe
+or
+.BR enabled-probe .
+.TP
+.B /sys/kernel/photonicat-pm/pmu_power_on_mode_capability
+PMU power-on mode policy state (read-only). Values:
+.BR pending-probe
+or
+.BR enabled-probe .
+.TP
 .B /sys/kernel/photonicat-pm/power_on_event
 Last power-on event code (read-only). Values: 0 = unknown,
 1 = power button, 2 = scheduled, 3 = charger connected, 4 = USB.
@@ -206,6 +259,45 @@ Last power-on event code (read-only). Values: 0 = unknown,
 .B /sys/kernel/photonicat-pm/charger_on_auto_start
 Charger auto-start control (read-write). Write 1 to enable automatic
 startup when charger is connected, 0 to disable.
+.TP
+.B /sys/kernel/photonicat-pm/power_on_mode
+PMU power-on mode (read-write). Reads
+.BR unconfigured ,
+.BR enabled ,
+or
+.BR disabled ;
+accepts
+.B enabled
+/
+.B 1
+and
+.B disabled
+/
+.BR 0 .
+The PMU stores the mode.
+.B unconfigured
+is the state of a PMU whose mode has never been set and is one-way: on
+.B RA2E1260702000
+the PMU refuses every set value except
+.B enabled
+and
+.BR disabled ,
+so the first write leaves it permanently. Raw
+.B POWER_ON_MODE_V2_SET
+frames written to
+.I /dev/pcat-pm-ctl
+are forwarded only when they carry the query payload
+.RB ( 0xFF );
+raw writes are blocked so the exported state cannot drift from the PMU.
+.PP
+The PMU voltage threshold command
+.RB ( VOLTAGE_THRESHOLD_SET ", " 0x17 )
+is not implemented.
+.B RA2E1260702000
+refuses it for every payload tested, and the PMU has no command to read the
+thresholds back. The command number remains in
+.I photonicat-pm.h
+for raw control-device users.
 .SH DEVICE TREE
 The driver reads configuration from the device tree node at probe time.
 .SS Required Properties

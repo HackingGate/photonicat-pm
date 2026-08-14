@@ -17,6 +17,7 @@ static enum power_supply_property pcat_pm_battery_v1_properties[] = {
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
+	POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD,
 	POWER_SUPPLY_PROP_MODEL_NAME,
 };
 
@@ -33,6 +34,7 @@ static enum power_supply_property pcat_pm_battery_v2_properties[] = {
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
+	POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD,
 	POWER_SUPPLY_PROP_MODEL_NAME,
 };
 
@@ -40,6 +42,92 @@ static enum power_supply_property pcat_pm_ac_properties[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 };
+
+static bool pcat_pm_charge_threshold_enabled(struct pcat_pm_data *pm_data)
+{
+	return pcat_pm_probe_capability_enabled(
+		READ_ONCE(pm_data->pmu_fw_caps.charge_threshold_capability));
+}
+
+void pcat_pm_charge_threshold_query(struct pcat_pm_data *pm_data)
+{
+	pcat_pm_uart_write_data(pm_data, PCAT_PM_COMMAND_CHARGE_THRESHOLD_GET,
+		NULL, 0, true, 0);
+}
+
+void pcat_pm_charge_threshold_report(struct pcat_pm_data *pm_data, u8 threshold)
+{
+	bool promoted = false;
+
+	if (threshold < PCAT_PM_CHARGE_THRESHOLD_MIN ||
+	    threshold > PCAT_PM_CHARGE_THRESHOLD_MAX) {
+		dev_warn(&pm_data->serdev->dev,
+			"Ignoring out-of-range PMU charge threshold %u.\n",
+			threshold);
+		return;
+	}
+
+	mutex_lock(&pm_data->mutex);
+	pm_data->charge_threshold = threshold;
+	if (pm_data->pmu_fw_caps.charge_threshold_capability !=
+	    PCAT_PM_PROBE_CAP_ENABLED) {
+		pm_data->pmu_fw_caps.charge_threshold_capability =
+			PCAT_PM_PROBE_CAP_ENABLED;
+		promoted = true;
+	}
+	mutex_unlock(&pm_data->mutex);
+
+	if (promoted)
+		dev_info(&pm_data->serdev->dev,
+			"PMU charge threshold enabled after runtime validation (%u%%).\n",
+			threshold);
+
+	if (!IS_ERR_OR_NULL(pm_data->battery_psy))
+		power_supply_changed(pm_data->battery_psy);
+}
+
+/**
+ * pcat_pm_charge_threshold_set - Program the PMU charge stop threshold
+ * @pm_data: Driver data
+ * @threshold: Requested threshold percentage
+ *
+ * Sends CHARGE_THRESHOLD_SET and waits for the PMU ACK. The threshold is
+ * not gated on the runtime capability state: firmware without support does
+ * not answer, which surfaces as -ETIMEDOUT, and a firmware that answers
+ * promotes the capability.
+ *
+ * Return: 0 on success, -EINVAL out of range, -EIO if the PMU refused the
+ * value, -ETIMEDOUT if the PMU did not answer.
+ */
+static int pcat_pm_charge_threshold_set(struct pcat_pm_data *pm_data,
+	int threshold)
+{
+	u8 value = threshold;
+	int ret;
+
+	if (threshold < PCAT_PM_CHARGE_THRESHOLD_MIN ||
+	    threshold > PCAT_PM_CHARGE_THRESHOLD_MAX)
+		return -EINVAL;
+
+	ret = pcat_pm_cmd_send_wait(pm_data, &pm_data->charge_threshold_ack,
+		PCAT_PM_COMMAND_CHARGE_THRESHOLD_SET, &value, 1,
+		PCAT_PM_CMD_ACK_TIMEOUT_MS);
+	if (ret) {
+		if (ret == -EIO)
+			dev_err(&pm_data->serdev->dev,
+				"Failed to set charge threshold %u%%.\n", value);
+		return ret;
+	}
+
+	pcat_pm_charge_threshold_report(pm_data, value);
+
+	/* Read the threshold back so the exported value stays the PMU's own
+	 * state rather than the requested one.
+	 */
+	pcat_pm_charge_threshold_query(pm_data);
+
+	return 0;
+}
 
 static int pcat_pm_battery_get_prop(struct power_supply *ps,
 		enum power_supply_property prop,
@@ -122,11 +210,43 @@ static int pcat_pm_battery_get_prop(struct power_supply *ps,
 		else if (val->intval < 0)
 			val->intval = 0;
 		break;
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
+		if (!pcat_pm_charge_threshold_enabled(pm_data))
+			return -ENODATA;
+		mutex_lock(&pm_data->mutex);
+		val->intval = pm_data->charge_threshold;
+		mutex_unlock(&pm_data->mutex);
+		break;
 	default:
 		return -EINVAL;
 	}
 
 	return 0;
+}
+
+static int pcat_pm_battery_set_prop(struct power_supply *ps,
+		enum power_supply_property prop,
+		const union power_supply_propval *val)
+{
+	struct pcat_pm_data *pm_data = power_supply_get_drvdata(ps);
+
+	switch (prop) {
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
+		return pcat_pm_charge_threshold_set(pm_data, val->intval);
+	default:
+		return -EINVAL;
+	}
+}
+
+static int pcat_pm_battery_prop_is_writeable(struct power_supply *ps,
+		enum power_supply_property prop)
+{
+	switch (prop) {
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
+		return 1;
+	default:
+		return 0;
+	}
 }
 
 static int pcat_pm_charger_get_prop(struct power_supply *ps,
@@ -157,6 +277,8 @@ static const struct power_supply_desc pcat_pm_battery_v1_desc = {
 	.properties = pcat_pm_battery_v1_properties,
 	.num_properties = ARRAY_SIZE(pcat_pm_battery_v1_properties),
 	.get_property = pcat_pm_battery_get_prop,
+	.set_property = pcat_pm_battery_set_prop,
+	.property_is_writeable = pcat_pm_battery_prop_is_writeable,
 };
 
 static const struct power_supply_desc pcat_pm_battery_v2_desc = {
@@ -165,6 +287,8 @@ static const struct power_supply_desc pcat_pm_battery_v2_desc = {
 	.properties = pcat_pm_battery_v2_properties,
 	.num_properties = ARRAY_SIZE(pcat_pm_battery_v2_properties),
 	.get_property = pcat_pm_battery_get_prop,
+	.set_property = pcat_pm_battery_set_prop,
+	.property_is_writeable = pcat_pm_battery_prop_is_writeable,
 };
 
 static const struct power_supply_desc pcat_pm_charger_desc = {

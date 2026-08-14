@@ -54,6 +54,28 @@ void pcat_pm_ctl_cmd_exec(struct pcat_pm_data *pm_data,
 		break;
 	case PCAT_PM_COMMAND_FAN_SET_ACK:
 		break;
+	/* The charge threshold is owned by the battery power supply ABI
+	 * (charge_control_end_threshold). Raw writes would desynchronize the
+	 * cached value, so only the read-back command is forwarded.
+	 */
+	case PCAT_PM_COMMAND_CHARGE_THRESHOLD_SET:
+		break;
+	case PCAT_PM_COMMAND_CHARGE_THRESHOLD_SET_ACK:
+		break;
+	case PCAT_PM_COMMAND_CHARGE_THRESHOLD_GET:
+		forward_cmd = true;
+		break;
+	case PCAT_PM_COMMAND_CHARGE_THRESHOLD_GET_ACK:
+		break;
+	/* The power-on mode command doubles as its own query: forward the
+	 * query payload, block raw writes that would desynchronize the driver.
+	 */
+	case PCAT_PM_COMMAND_POWER_ON_MODE_V2_SET:
+		forward_cmd = extra_data_len >= 1 &&
+			extra_data[0] == PCAT_PM_POWER_ON_MODE_QUERY;
+		break;
+	case PCAT_PM_COMMAND_POWER_ON_MODE_V2_SET_ACK:
+		break;
 	default:
 		forward_cmd = true;
 		break;
