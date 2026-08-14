@@ -207,7 +207,7 @@ before reading back a confirmed state.
 
 | Interface | Description |
 |-----------|-------------|
-| `/dev/pcat-pm-ctl` | Root-only raw PMU command interface. Userspace can read selected raw PMU responses, including hardware/firmware version ACKs used by `pcat-pmu-updater --pmu-fw-version-get`. See `pcat-pm-ctl(4)` man page for frame format and details. |
+| `/dev/pcat-pm-ctl` | Root-only raw PMU command interface. Userspace can read selected raw PMU responses, including hardware/firmware version ACKs used by `pcat-pmu-updater --pmu-fw-version-get`. See [Protocol](#protocol) for the frame format and `pcat-pm-ctl(4)` for details. |
 
 ## Building
 
@@ -561,8 +561,9 @@ echo disabled > /sys/kernel/photonicat-pm/power_on_mode
 ### Control Device (`/dev/pcat-pm-ctl`)
 
 Raw escape hatch for advanced PMU commands using the binary serial protocol.
-See the `pcat-pm-ctl(4)` man page for the frame format, the commands the driver
-refuses to forward, and the responses that can be read back.
+See [Protocol](#protocol) below for the frame format, and the `pcat-pm-ctl(4)`
+man page for the commands the driver refuses to forward and the responses that
+can be read back.
 
 ## Protocol
 

@@ -371,11 +371,11 @@ echo "$speed" > "$fan_cdev/cur_state"
 .fi
 .RE
 .TP
-Read the status LED state the PMU last acknowledged:
-.B sleep 1; cat /sys/kernel/photonicat-pm/status_led
+Turn the status LED off, then read the state the PMU acknowledged:
+.B "echo 0 > /sys/kernel/photonicat-pm/status_led; sleep 1; cat /sys/kernel/photonicat-pm/status_led"
 .TP
-Set net LED blink pattern (50 ms on, 50 ms off):
-.B "echo 50 > /sys/kernel/photonicat-pm/net_status_led_on_time && echo 50 > /sys/kernel/photonicat-pm/net_status_led_off_time"
+Set net LED blink pattern (50 ms on, 50 ms off, repeating):
+.B "echo 50 > /sys/kernel/photonicat-pm/net_status_led_on_time && echo 50 > /sys/kernel/photonicat-pm/net_status_led_off_time && echo 0 > /sys/kernel/photonicat-pm/net_status_led_repeat"
 .TP
 Power off now, automatically power on after 60 seconds:
 .B rtcwake -m off -s 60
