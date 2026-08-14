@@ -25,8 +25,11 @@ definitions come from.
 
 No specification of behavior exists: no document states which commands a given
 firmware version honors, what it does when it declines one, or which fields are
-trustworthy. The per-firmware results below were established by testing real
-hardware and can change between firmware versions without notice.
+trustworthy. Everything here describes current firmware, established by testing
+real hardware; behavior can change between firmware versions without notice.
+Results for older firmware are recorded under
+[MCU Firmware Observed Behavior](https://github.com/HackingGate/photonicat-pm/wiki/MCU-Firmware-Observed-Behavior)
+in the wiki.
 
 Firmware defects are outside what this driver can fix — a PMU that ignores a
 command, reports a broken clock, or rolls back an update behaves that way before
@@ -67,38 +70,24 @@ detection, not as a static firmware-version allowlist or denylist.
   that reverts. Some firmware ignores the set command entirely and reports a
   constant state, which leaves both attributes uncontrollable.
 
-Per-firmware results are evidence for diagnostics, not feature gates.
-*Promotes* means the capability reached `enabled-probe`; *—* means not
-evaluated.
+Current firmware honors all four gated features, so a capability that stays
+`pending-probe` means the running firmware is older than the driver expects.
+Which version fails which feature is recorded in
+[MCU Firmware Observed Behavior](https://github.com/HackingGate/photonicat-pm/wiki/MCU-Firmware-Observed-Behavior),
+along with the wiki's flashing instructions. Two limitations survive on current
+firmware:
 
-| Firmware version | RTC and scheduled boot | Status LED and beeper control | Charge stop threshold | Power-on mode |
-|------------------|------------------------|-------------------------------|-----------------------|---------------|
-| `RA2E1250815002` | Promotes; scheduled boot works. | Ignored; the PMU acknowledges state `0x01` whatever is requested. | — | — |
-| `RA2E1250918000` | Promotes; scheduled boot works. | Honored. | — | — |
-| `RA2E1260306000` | Stays `pending-probe`; scheduled boot blocked. | Honored. | — | — |
-| `RA2E1260515000` | Stays `pending-probe`; scheduled boot blocked. | Honored. | — | — |
-| `RA2E1260702000` | Promotes; scheduled boot works. | Honored. | Promotes; honored. Values below 50 or above 100 are refused by the PMU, and charging stops once the threshold is reached. | Promotes; honored. Only `enabled` and `disabled` are accepted, and the initial `unconfigured` state cannot be restored. |
-
-`RA2E1260730001` and `RA2E1260813002` are absent because the PMU does not stay
-on either firmware, so nothing could be evaluated.
-
-Two behaviors have no column:
-
-- **Fan auto-speed reset** is not per-firmware — no tested version exposes a
-  trusted API for it, so it is a prose caution under
+- **Fan auto-speed reset**: no firmware exposes a trusted API for it, so
+  restoring PMU auto speed needs the workarounds under
   [Fan Control](#fan-control).
 - **`VOLTAGE_THRESHOLD_SET` (`0x17`)**, the LED, startup, charger limit,
-  auto-shutdown and battery-full voltages the vendor manager configures, backs
-  no driver feature. `RA2E1260702000` refuses every payload tested (the
-  vendor's 18-byte layout with plausible voltages, the same layout zeroed, a
-  16-byte variant, a 2-byte payload), and no command reads the thresholds back,
-  so an accepted write could not be verified either. The command number stays
-  in `photonicat-pm.h` for raw `/dev/pcat-pm-ctl` users; the driver never sends
-  it.
+  auto-shutdown and battery-full voltages the vendor manager configures: the
+  PMU refuses every payload tested and offers no command to read the thresholds
+  back, so the driver never sends it and exposes no attributes for it. The
+  command number stays in `photonicat-pm.h` for raw `/dev/pcat-pm-ctl` users.
 
-`pmu_hw_version` is a firmware-reported string, not a stable board revision:
-the same board reported `NT2421A4` under `RA2E1260515000` and `NT2421A3` under
-`RA2E1250815002`.
+`pmu_hw_version` is a firmware-reported string, not a stable board revision —
+the same board reports different values under different firmware.
 
 ## Features
 
@@ -131,11 +120,10 @@ PMU has answered a threshold query at least once; see
 |-----------|-------------|
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
 
-> [!CAUTION]
-> Known affected firmware: `RA2E1260306000`, `RA2E1260515000`.
-> The hardware RTC reports broken values. `/dev/rtc0` remains registered for
-> ABI stability, but RTC reads report invalid data and alarm programming fails
-> until runtime validation promotes `pmu_rtc_capability` to `enabled-probe`.
+`/dev/rtc0` is registered before the PMU clock is trusted, so reads report
+invalid data and alarm programming fails until `pmu_rtc_capability` reaches
+`enabled-probe`. Firmware whose RTC never passes that probe is listed in the
+wiki.
 
 ### Sensors & Fan
 
@@ -158,32 +146,12 @@ PMU has answered a threshold query at least once; see
 | `/sys/kernel/photonicat-pm/net_status_led_repeat` | Network status LED repeat count (read-write, 0–65535). 0 = infinite. |
 | `/sys/kernel/photonicat-pm/movement_trigger` | Accelerometer-based motion detection (read-only). Returns 1 if motion detected, 0 otherwise. |
 
-> [!CAUTION]
-> Known affected firmware: `RA2E1250815002`.
-> The PMU ignores `STATUS_LED_BEEPER_V2_SET` (`0x9B`). Whatever state the
-> driver requests, the PMU answers `STATUS_LED_BEEPER_V2_SET_ACK` (`0x9C`)
-> with a constant payload of `0x01`: status LED bit set, beeper bit clear.
-> Requesting the LED off and requesting the beeper on are both refused, so
-> neither `status_led` nor `beeper` is controllable on this firmware.
->
-> Because the acknowledged beeper bit is stuck at 0, `beeper` reads 0 while
-> the board still beeps audibly. A 0 here means the PMU reported 0, not that
-> the beeper is silent.
->
-> `0x9B` is the only status LED and beeper command in the protocol; there is
-> no earlier variant to fall back to. This driver builds the state byte and
-> parses the acknowledgement exactly as the vendor manager does. Whether the
-> acknowledged byte is a state or a result code is unsettled: the vendor
-> stores it as state bits but logs it as `PMU IO operation status`. Under
-> either reading the requested state is not applied.
->
-> Per-firmware results are in
-> [PMU Firmware Capability Policy](#pmu-firmware-capability-policy).
-
-`status_led` and `beeper` reads report the state from the PMU's last ACK, not
-the value last written. A read issued immediately after a write returns the
-requested value because the ACK has not arrived yet; wait about a second
-before reading back a confirmed state.
+`status_led` and `beeper` reads report the state from the PMU's last
+`STATUS_LED_BEEPER_V2_SET_ACK`, not the value last written. A read issued
+immediately after a write returns the requested value because the ACK has not
+arrived yet; wait about a second before reading back a confirmed state. A
+readback that reverts means the PMU refused the write — older firmware ignores
+the set command outright, which the wiki records.
 
 ### PMU Information
 
@@ -396,9 +364,8 @@ points. See the [Device Tree example](#example). Once the system shuts down the
 governor stops and the PMU retains the last SET value.
 
 > [!CAUTION]
-> Known affected firmware: all tested firmware versions.
-> No trusted API is exposed to reset fan control back to PMU auto speed; the
-> steps below are workarounds.
+> No firmware exposes a trusted API to reset fan control back to PMU auto
+> speed; the steps below are workarounds.
 >
 > Because of that, `unmanaged` only means the driver has not sent a fan SET
 > command since loading — the PMU may still be holding a fixed speed set
@@ -477,8 +444,7 @@ sleep 1
 cat /sys/kernel/photonicat-pm/status_led
 ```
 
-On firmware that refuses the write, the read returns the PMU's constant state
-instead of the requested one — for `status_led` that is 1. See the caution under
+On firmware that refuses the write, the read reverts to the PMU's own state. See
 [LEDs & Peripherals](#leds--peripherals).
 
 ### PMU Hardware / Firmware Version
@@ -553,10 +519,9 @@ echo disabled > /sys/kernel/photonicat-pm/power_on_mode
 
 > [!CAUTION]
 > `unconfigured` is the state of a PMU whose power-on mode has never been set,
-> and it is one-way. On `RA2E1260702000` the PMU refuses every set value except
-> `enabled` and `disabled`, so the first write to this attribute leaves
-> `unconfigured` permanently. `disabled` is the state the vendor manager uses
-> for manual power-on.
+> and leaving it is one-way. The PMU accepts only `enabled` and `disabled`, so
+> the first write to this attribute leaves `unconfigured` permanently.
+> `disabled` is the state the vendor manager uses for manual power-on.
 
 ### Control Device (`/dev/pcat-pm-ctl`)
 
