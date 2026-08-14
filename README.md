@@ -64,6 +64,7 @@ Per-firmware results are evidence for diagnostics, not feature gates:
 | `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. |
 | `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
 | `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
+| `RA2E1260702000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. |
 | `RA2E1260730001` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
 | `RA2E1260813002` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
 
