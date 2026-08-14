@@ -21,8 +21,11 @@ photonicat-pm (1.0.5-1) unstable; urgency=medium
     rather than the man page, which documents command definitions instead.
   * Check man page rendering and README anchors from pre-commit, and track
     pre-commit hook revisions with dependabot.
+  * Move the per-firmware observed results to the project wiki. README.md
+    and pcat-pm-ctl(4) now describe current firmware behavior only and link
+    to the wiki for older versions.
 
- -- HackingGate <i@hackinggate.com>  Fri, 14 Aug 2026 23:44:05 +0900
+ -- HackingGate <i@hackinggate.com>  Fri, 14 Aug 2026 23:52:07 +0900
 
 photonicat-pm (1.0.4-1) unstable; urgency=medium
 

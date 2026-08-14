@@ -81,23 +81,16 @@ while the capability is pending. Writes are not gated on the probe: firmware
 without support does not answer, so the write fails with
 .BR ETIMEDOUT .
 .PP
-Observed per-firmware results are evidence for diagnostics, not feature gates.
-RTC promotes to
-.B enabled-probe
-on
-.BR RA2E1250815002 ,
-.BR RA2E1250918000 ,
-and
-.BR RA2E1260702000 ,
-and remains
+Current firmware honors every gated feature, so a capability that stays
 .B pending-probe
-on
-.B RA2E1260306000
-and
-.BR RA2E1260515000 ,
-where scheduled boot stays blocked by runtime validation. The project README
-carries the full matrix, including status LED, charge threshold, and power-on
-mode results.
+means the running firmware is older than the driver expects. Per-firmware
+results are recorded in the project wiki:
+.PP
+.RS
+.nf
+https://github.com/HackingGate/photonicat-pm/wiki/MCU\-Firmware\-Observed\-Behavior
+.fi
+.RE
 .SS Power Supply
 .TP
 .B /sys/class/power_supply/battery/
@@ -269,9 +262,8 @@ and
 .BR 0 .
 The PMU stores the mode.
 .B unconfigured
-is the state of a PMU whose mode has never been set and is one-way: on
-.B RA2E1260702000
-the PMU refuses every set value except
+is the state of a PMU whose mode has never been set, and leaving it is one-way:
+the PMU accepts only
 .B enabled
 and
 .BR disabled ,
@@ -285,10 +277,8 @@ raw writes are blocked so the exported state cannot drift from the PMU.
 .PP
 The PMU voltage threshold command
 .RB ( VOLTAGE_THRESHOLD_SET ", " 0x17 )
-is not implemented.
-.B RA2E1260702000
-refuses it for every payload tested, and the PMU has no command to read the
-thresholds back. The command number remains in
+is not implemented. The PMU refuses it for every payload tested and has no
+command to read the thresholds back. The command number remains in
 .I photonicat-pm.h
 for raw control-device users.
 .SH DEVICE TREE
