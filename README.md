@@ -30,9 +30,9 @@ change between firmware versions without notice.
 Firmware defects are therefore outside what this driver can fix. A PMU that
 ignores a command, reports a broken clock, or rolls back an update is behaving
 that way before the driver sees the response. Such behavior is documented here
-so users can recognize it, and should be reported to the vendor. Issues in this
-repository are for the driver: parsing, sysfs and ABI behavior, kernel
-integration, and packaging.
+and in the wiki so users can recognize it, and should be reported to the
+vendor. Issues in this repository are for the driver: parsing, sysfs and ABI
+behavior, kernel integration, and packaging.
 
 ## MCU Firmware Capability Policy
 
@@ -56,7 +56,7 @@ detection, not as a static firmware-version allowlist or denylist.
   that reverts. Some firmware ignores the set command entirely and reports a
   constant state, which leaves both attributes uncontrollable.
 
-Observed per-firmware results are evidence for diagnostics, not feature gates:
+Per-firmware results are evidence for diagnostics, not feature gates:
 
 | Firmware version | RTC and scheduled boot | Status LED and beeper control |
 |------------------|------------------------|-------------------------------|
@@ -65,9 +65,7 @@ Observed per-firmware results are evidence for diagnostics, not feature gates:
 | `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
 | `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
 | `RA2E1260730001` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
-
-`RA2E1260730001` has no observations because it never survives a flash. See
-[MCU Firmware `RA2E1260730001` Does Not Persist](#mcu-firmware-ra2e1260730001-does-not-persist).
+| `RA2E1260813002` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
 
 Fan auto-speed reset is not per-firmware: no tested version exposes a trusted
 API for it, so it stays a prose caution under [Fan Control](#fan-control)
@@ -78,60 +76,6 @@ board-independent identifier. The same board reported `NT2421A4` under
 `RA2E1260515000` and `NT2421A3` under `RA2E1250815002`. Treat
 `pmu_hw_version` as a firmware-reported string, not as a stable board
 revision.
-
-## MCU Firmware `RA2E1260730001` Does Not Persist
-
-The vendor manifest
-(`https://dl.photonicat.com/firmware/pcat2_mcu/latest_img.json`) published
-`RA2E1260730001` on 2026-07-30, matching the Photonicat 2 OpenWrt `r7853`
-release. As of 2026-08-08 the same package is also served at the fixed
-`https://dl.photonicat.com/firmware/pcat2_mcu/ota.bin` URL, so that URL is not
-a source of older firmware despite being described elsewhere as a rollback
-image.
-
-Both URLs are mutable. The package tested here, observed on 2026-08-08, is:
-
-| Field | Value |
-|-------|-------|
-| Manifest version | `RA2E1260730001` |
-| Manifest filename | `ota_RA2E120260730001000.bin` |
-| SHA256 | `e5db214ea08dd9cee04adc86204030634d695d3bd5067a0bbcf71b5b655506dd` |
-| Wrapped size | 63816 bytes |
-| Payload size | 63304 bytes |
-| Payload CRC32 | `5a5d0144` |
-
-That package downloads and validates correctly (manifest SHA256, `ARBDPHC2`
-magic, `RA2E1` version, payload size, CRC32), and the upstream
-`pcat-pmu-updater` streams it to 100% and prints
-`PMU firmware updated successfully.` before powering the system off. The PMU
-then restarts the board on its own and reports `RA2E1250815002` — an older
-2025-08-15 build — instead of the flashed version.
-
-Observed on this driver:
-
-| Version before flash | Version after flash |
-|----------------------|---------------------|
-| `RA2E1260515000` | `RA2E1250815002` |
-| `RA2E1250815002` | `RA2E1250815002` |
-
-The same rollback has been reported independently on the vendor OpenWrt image
-using the vendor's own `pcat-pmu-updater`, flashing the same package from
-`RA2E1260702000`. The rollback is therefore an MCU-side behavior of
-`RA2E1260730001`, not a fault in this driver's raw control path: the updater's
-`--pmu-fw-version-get` query, the `0xCB`/`0xCD`/`0xD3`/`0xCF` update sequence,
-and the success acknowledgement all complete through `/dev/pcat-pm-ctl`.
-
-Do not treat a successful `pcat-pmu-updater` run as proof of an applied
-update. Always re-read the version after the board comes back up:
-
-```bash
-cat /sys/kernel/photonicat-pm/pmu_fw_version
-sudo pcat-pmu-updater --pmu-fw-version-get
-```
-
-Because `ota.bin` now serves `RA2E1260730001`, there is no published rollback
-path back to `RA2E1260515000`; a board that lands on `RA2E1250815002` stays
-there unless an older package is recovered from a prior OpenWrt image.
 
 ## Features
 
