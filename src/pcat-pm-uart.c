@@ -84,6 +84,63 @@ u16 pcat_pm_compute_crc16(const u8 *data, size_t len)
 	return crc;
 }
 
+void pcat_pm_cmd_ack_init(struct pcat_pm_cmd_ack *ack)
+{
+	mutex_init(&ack->cmd_mutex);
+	init_waitqueue_head(&ack->wait);
+	ack->frame = 0;
+	ack->status = 0;
+	ack->seen = false;
+}
+
+void pcat_pm_cmd_ack_record(struct pcat_pm_data *pm_data,
+	struct pcat_pm_cmd_ack *ack, u16 frame_num, u8 status)
+{
+	mutex_lock(&pm_data->mutex);
+	ack->frame = frame_num;
+	ack->status = status;
+	ack->seen = true;
+	mutex_unlock(&pm_data->mutex);
+
+	wake_up(&ack->wait);
+}
+
+int pcat_pm_cmd_send_wait(struct pcat_pm_data *pm_data,
+	struct pcat_pm_cmd_ack *ack, u16 command, const u8 *extra_data,
+	u16 extra_data_len, unsigned int timeout_ms)
+{
+	u16 frame_num;
+	long remaining;
+	int ret;
+
+	mutex_lock(&ack->cmd_mutex);
+
+	mutex_lock(&pm_data->mutex);
+	ack->seen = false;
+	ack->frame = 0;
+	ack->status = 0;
+	mutex_unlock(&pm_data->mutex);
+
+	ret = pcat_pm_uart_write_data_frame(pm_data, command, extra_data,
+		extra_data_len, true, 0, &frame_num);
+	if (ret < 0)
+		goto out_unlock;
+
+	remaining = wait_event_timeout(ack->wait,
+		READ_ONCE(ack->seen) && READ_ONCE(ack->frame) == frame_num,
+		msecs_to_jiffies(timeout_ms));
+	if (!remaining) {
+		ret = -ETIMEDOUT;
+		goto out_unlock;
+	}
+
+	ret = READ_ONCE(ack->status) ? -EIO : 0;
+
+out_unlock:
+	mutex_unlock(&ack->cmd_mutex);
+	return ret;
+}
+
 static void pcat_pm_record_rtc_ack(struct pcat_pm_data *pm_data, bool *ack_seen,
 	u16 *ack_frame, u8 *ack_status, u16 frame_num, const u8 *extra_data,
 	u16 extra_data_len)
@@ -527,6 +584,30 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 			pm_data->beeper_enabled = (extra_data[0] >> 1) & 1;
 			mutex_unlock(&pm_data->mutex);
 		}
+		break;
+
+	case PCAT_PM_COMMAND_CHARGE_THRESHOLD_SET_ACK:
+		pcat_pm_cmd_ack_record(pm_data, &pm_data->charge_threshold_ack,
+			frame_num, extra_data_len > 0 ? extra_data[0] : 0);
+		break;
+
+	/* The PMU answers a mode query with the state flag or-ed with the
+	 * stored mode, and a set command with a plain status byte.
+	 */
+	case PCAT_PM_COMMAND_POWER_ON_MODE_V2_SET_ACK:
+		if (extra_data_len < 1)
+			break;
+		if (extra_data[0] & PCAT_PM_POWER_ON_MODE_STATE_FLAG)
+			pcat_pm_power_on_mode_report(pm_data, extra_data[0]);
+		else
+			pcat_pm_cmd_ack_record(pm_data,
+				&pm_data->power_on_mode_ack, frame_num,
+				extra_data[0]);
+		break;
+
+	case PCAT_PM_COMMAND_CHARGE_THRESHOLD_GET_ACK:
+		if (extra_data_len >= 1)
+			pcat_pm_charge_threshold_report(pm_data, extra_data[0]);
 		break;
 
 	case PCAT_PM_COMMAND_DEVICE_MOVEMENT:

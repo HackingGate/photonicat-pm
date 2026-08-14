@@ -195,6 +195,8 @@ static int pcat_pm_probe(struct serdev_device *serdev)
 	mutex_init(&pm_data->ctl_read_mutex);
 	init_waitqueue_head(&pm_data->ctl_wait);
 	init_waitqueue_head(&pm_data->rtc_cmd_wait);
+	pcat_pm_cmd_ack_init(&pm_data->charge_threshold_ack);
+	pcat_pm_cmd_ack_init(&pm_data->power_on_mode_ack);
 
 	pm_data->status_report_timestamp = ktime_get_boottime_ns();
 	pm_data->status_report_timeout_warn_timestamp = pm_data->status_report_timestamp;
@@ -280,6 +282,12 @@ static int pcat_pm_probe(struct serdev_device *serdev)
 	/* Query power-on event */
 	pcat_pm_uart_write_data(pm_data,
 		PCAT_PM_COMMAND_POWER_ON_EVENT_GET, NULL, 0, true, 0);
+
+	/* Query charge stop threshold (firmware without support stays pending) */
+	pcat_pm_charge_threshold_query(pm_data);
+
+	/* Query power-on mode (firmware without support stays pending) */
+	pcat_pm_power_on_mode_query(pm_data);
 
 	/* Query initial LED/beeper state from PMU (0xFF = get current state) */
 	{

@@ -51,6 +51,17 @@ detection, not as a static firmware-version allowlist or denylist.
   not trusted by current driver releases. `energy_full` remains the static
   device-tree design capacity, `energy_now` is not exported, and fan auto-speed
   restoration requires the documented workarounds.
+- **Charge stop threshold**: starts as `pending-probe`. The driver queries the
+  PMU on load; a reply in the 50–100 range caches the value and promotes
+  `pmu_charge_threshold_capability` to `enabled-probe`.
+  `charge_control_end_threshold` reads `ENODATA` while the capability is
+  pending. Writes are not gated on the probe: firmware without support does
+  not answer, so the write fails with `ETIMEDOUT`, and a firmware that answers
+  promotes the capability.
+- **Power-on mode**: starts as `pending-probe`. The driver queries the PMU on
+  load, and any answer promotes `pmu_power_on_mode_capability` to
+  `enabled-probe`. `power_on_mode` reads `ENODATA` while the capability is
+  pending.
 - **Status LED and beeper**: the driver reports the state from the PMU's last
   `STATUS_LED_BEEPER_V2_SET_ACK`, so a refused write is visible as a readback
   that reverts. Some firmware ignores the set command entirely and reports a
@@ -58,19 +69,30 @@ detection, not as a static firmware-version allowlist or denylist.
 
 Per-firmware results are evidence for diagnostics, not feature gates:
 
-| Firmware version | RTC and scheduled boot | Status LED and beeper control |
-|------------------|------------------------|-------------------------------|
-| `RA2E1250815002` | Promotes to `enabled-probe`; scheduled boot works. | Ignored; the PMU acknowledges state `0x01` whatever is requested. |
-| `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. |
-| `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
-| `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. |
-| `RA2E1260702000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. |
-| `RA2E1260730001` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
-| `RA2E1260813002` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
+| Firmware version | RTC and scheduled boot | Status LED and beeper control | Charge stop threshold | Power-on mode |
+|------------------|------------------------|-------------------------------|-----------------------|---------------|
+| `RA2E1250815002` | Promotes to `enabled-probe`; scheduled boot works. | Ignored; the PMU acknowledges state `0x01` whatever is requested. | Not evaluated. | Not evaluated. |
+| `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. | Not evaluated. | Not evaluated. |
+| `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. | Not evaluated. | Not evaluated. |
+| `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. | Not evaluated. | Not evaluated. |
+| `RA2E1260702000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. | Promotes to `enabled-probe`; honored. Values below 50 or above 100 are refused by the PMU, and charging stops once the threshold is reached. | Promotes to `enabled-probe`; honored. Only `enabled` and `disabled` are accepted, and the initial `unconfigured` state cannot be restored. |
+| `RA2E1260730001` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
+| `RA2E1260813002` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
 
 Fan auto-speed reset is not per-firmware: no tested version exposes a trusted
 API for it, so it stays a prose caution under [Fan Control](#fan-control)
 rather than a column here.
+
+The PMU voltage threshold command (`VOLTAGE_THRESHOLD_SET`, `0x17`) — the LED,
+startup, charger limit, auto-shutdown and battery-full voltages the vendor
+manager configures — has no column because no driver feature depends on it.
+`RA2E1260702000` answers it with a refusal for every payload tested: the
+vendor's own 18-byte layout with plausible voltages, the same layout with
+zeros, a 16-byte variant, and a short 2-byte payload. The command number is
+kept in `photonicat-pm.h` for raw `/dev/pcat-pm-ctl` users, but the driver
+never sends it and exposes no attributes for it. There is also no command to
+read these thresholds back, so a firmware that did accept a write could not be
+verified.
 
 `pmu_hw_version` is reported by the running MCU firmware, not read from a
 board-independent identifier. The same board reported `NT2421A4` under
@@ -85,11 +107,20 @@ revision.
 | Interface | Description |
 |-----------|-------------|
 | `/sys/class/power_supply/battery/` | Battery status, capacity (0–100%), voltage, current, power, and static design energy (read-only). |
+| `/sys/class/power_supply/battery/charge_control_end_threshold` | Charge stop threshold in percent (read-write, 50–100). Stored in the PMU, so it survives driver reload and reboot. |
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
 Battery capacity follows the vendor driver parser: PMU protocol v2 status
 reports expose PMU SOC directly, while shorter status reports use the
 device-tree OCV capacity table as fallback.
+
+The charge stop threshold is enforced by the PMU, not by the driver: writing
+`charge_control_end_threshold` sends the value to the PMU and reports the
+result of the PMU's ACK. Values outside 50–100 are rejected with `EINVAL`
+before any command is sent, a PMU refusal returns `EIO`, and firmware without
+charge threshold support returns `ETIMEDOUT`. Reads return `ENODATA` until the
+PMU has answered a threshold query at least once; see
+[MCU Firmware Capability Policy](#mcu-firmware-capability-policy).
 
 > [!CAUTION]
 > PMU protocol v2 status-report energy values are not validated as live or
@@ -165,6 +196,8 @@ before reading back a confirmed state.
 | `/sys/kernel/photonicat-pm/pmu_hw_version` | PMU hardware version string (read-only). Queried from PMU on driver load. |
 | `/sys/kernel/photonicat-pm/pmu_fw_version` | PMU firmware version string (read-only). Queried from PMU on driver load. |
 | `/sys/kernel/photonicat-pm/pmu_rtc_capability` | PMU RTC policy state (read-only). Values: `pending-probe` or `enabled-probe`. |
+| `/sys/kernel/photonicat-pm/pmu_charge_threshold_capability` | PMU charge threshold policy state (read-only). Values: `pending-probe` or `enabled-probe`. |
+| `/sys/kernel/photonicat-pm/pmu_power_on_mode_capability` | PMU power-on mode policy state (read-only). Values: `pending-probe` or `enabled-probe`. |
 | `/sys/kernel/photonicat-pm/power_on_event` | Last power-on event code (read-only). Values: 0 = unknown, 1 = power button, 2 = scheduled, 3 = charger connected, 4 = USB. |
 
 ### Configuration
@@ -172,6 +205,7 @@ before reading back a confirmed state.
 | Interface | Description |
 |-----------|-------------|
 | `/sys/kernel/photonicat-pm/charger_on_auto_start` | Charger auto-start control (read-write). Write 1 to enable automatic startup when charger is connected, 0 to disable. |
+| `/sys/kernel/photonicat-pm/power_on_mode` | PMU power-on mode (read-write). Reads `unconfigured`, `enabled`, or `disabled`; accepts `enabled`/`1` and `disabled`/`0`. Stored in the PMU. |
 
 ### Advanced
 
@@ -328,6 +362,27 @@ cat /sys/class/power_supply/battery/power_now
 test ! -e /sys/class/power_supply/battery/energy_now
 # energy_now is intentionally not exported by current driver releases
 ```
+
+### Charge Stop Threshold
+
+```bash
+# Stop charging at 80% (accepted range is 50-100)
+echo 80 > /sys/class/power_supply/battery/charge_control_end_threshold
+
+# Read the threshold currently stored in the PMU
+cat /sys/class/power_supply/battery/charge_control_end_threshold
+
+# Charge to full again
+echo 100 > /sys/class/power_supply/battery/charge_control_end_threshold
+
+# Check whether the running firmware answered the threshold query
+cat /sys/kernel/photonicat-pm/pmu_charge_threshold_capability
+# pending-probe or enabled-probe
+```
+
+The PMU stores the threshold, so it survives driver reload, reboot, and power
+off. Once the battery is above the threshold, `status` reads `Not charging`
+until the threshold is raised or the battery drains below it.
 
 ### Fan Control
 
@@ -531,6 +586,27 @@ echo 0 > /sys/kernel/photonicat-pm/charger_on_auto_start
 # Read current state
 cat /sys/kernel/photonicat-pm/charger_on_auto_start
 ```
+
+### Power-On Mode
+
+```bash
+# Read the mode stored in the PMU
+cat /sys/kernel/photonicat-pm/power_on_mode
+# unconfigured, enabled, or disabled
+
+# Power on automatically when external power is applied
+echo enabled > /sys/kernel/photonicat-pm/power_on_mode
+
+# Back to manual power-on
+echo disabled > /sys/kernel/photonicat-pm/power_on_mode
+```
+
+> [!CAUTION]
+> `unconfigured` is the state of a PMU whose power-on mode has never been set,
+> and it is one-way. On `RA2E1260702000` the PMU refuses every set value except
+> `enabled` and `disabled`, so the first write to this attribute leaves
+> `unconfigured` permanently. `disabled` is the state the vendor manager uses
+> for manual power-on.
 
 ### Control Device (`/dev/pcat-pm-ctl`)
 
