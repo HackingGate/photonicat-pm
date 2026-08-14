@@ -1,6 +1,6 @@
 .\" SPDX-License-Identifier: GPL-3.0-or-later
 .\" Man page for photonicat-pm kernel driver
-.TH PCAT-PM-CTL 4 "May 2026" "Linux" "Linux Programmer's Manual"
+.TH PCAT-PM-CTL 4 "August 2026" "Linux" "Linux Programmer's Manual"
 .SH NAME
 pcat-pm-ctl \- Photonicat power manager control device
 .SH SYNOPSIS
@@ -24,7 +24,7 @@ the driver still updates the corresponding sysfs attributes internally.
 See
 .I photonicat-pm.h
 for the protocol frame format and command definitions.
-.SS MCU Firmware Capability Policy
+.SS PMU Firmware Capability Policy
 The driver treats firmware behavior as runtime-observed capability or quirk
 detection, not as a static firmware-version allowlist or denylist.
 .TP
@@ -81,35 +81,31 @@ while the capability is pending. Writes are not gated on the probe: firmware
 without support does not answer, so the write fails with
 .BR ETIMEDOUT .
 .PP
-Observed RTC results are evidence for diagnostics, not feature gates:
-.TP
-.B RA2E1250918000
+Observed per-firmware results are evidence for diagnostics, not feature gates.
 RTC promotes to
-.BR enabled-probe
-and scheduled boot works.
-.TP
+.B enabled-probe
+on
+.BR RA2E1250815002 ,
+.BR RA2E1250918000 ,
+and
+.BR RA2E1260702000 ,
+and remains
+.B pending-probe
+on
 .B RA2E1260306000
-RTC remains
-.BR pending-probe
-and scheduled boot stays blocked by runtime validation.
-.TP
-.B RA2E1260515000
-RTC remains
-.BR pending-probe
-and scheduled boot stays blocked by runtime validation.
+and
+.BR RA2E1260515000 ,
+where scheduled boot stays blocked by runtime validation. The project README
+carries the full matrix, including status LED, charge threshold, and power-on
+mode results.
 .SS Power Supply
 .TP
 .B /sys/class/power_supply/battery/
 Battery status, capacity (0\-100%), voltage, current, power, and static
 design energy (read-only).
 .IP
-Battery capacity follows the vendor driver parser: PMU protocol v2 status
-reports expose PMU SOC directly, while shorter status reports use the
-device-tree OCV capacity table as fallback.
-.IP
-Current driver policy does not trust PMU protocol v2 status-report energy
-values as live or measured battery energy. This driver ignores PMU-reported
-energy values:
+PMU protocol v2 status-report energy values are not trusted as live or measured
+battery energy:
 .B energy_full
 is the static
 .B energy-full-design-microwatt-hours
@@ -182,21 +178,18 @@ writing
 Values 0\-100 set fan speed percentage.
 .TP
 .B /sys/kernel/photonicat-pm/fan_state
-Fan management state (read-only). Returns
-.B unmanaged
-if the driver has not sent a SET command since loading (the PMU could be at
-unmanaged fan speed or at a previously-set managed fan speed from before a reboot), or the
-managed fan speed percentage (0\-100) once set by the driver.
+Fan management state (read-only). Returns the managed fan speed percentage
+(0\-100) once the driver has set one, otherwise
+.BR unmanaged .
 .IP
-Current tested firmware versions expose no trusted API to reset fan control
-back to PMU auto speed.
+No tested firmware exposes a trusted API to reset fan control back to PMU auto
+speed, so
 .B unmanaged
-only means the driver has not sent a fan SET command since loading. Due to
-that limitation, it may sometimes mean the PMU retained the last fixed speed
-instead of returning to PMU auto speed. In managed fan speed, after shutdown,
-the fan stays at the last fixed speed and will not adjust on its own. If the
-retained speed is low and the device is still charging or otherwise thermally
-active, this can be unsafe for thermal management.
+only means the driver has not sent a fan SET command since loading: the PMU may
+still be holding a fixed speed set before a reboot. After a shutdown in managed
+fan speed the fan stays at the last fixed speed and will not adjust on its own.
+A low retained speed on a device that is still charging or otherwise thermally
+active is unsafe.
 .SS LEDs & Peripherals
 .TP
 .B /sys/kernel/photonicat-pm/status_led
@@ -229,25 +222,25 @@ PMU firmware version string (read-only). Queried from PMU on driver load.
 The raw version acknowledgment frame is also forwarded to
 .IR /dev/pcat-pm-ctl ,
 which allows tools such as
-.BR pcat-pmu-updater
+.B pcat-pmu-updater
 .B --pmu-fw-version-get
 to read the response through the control device.
 .TP
 .B /sys/kernel/photonicat-pm/pmu_rtc_capability
 PMU RTC policy state (read-only). Values:
-.BR pending-probe
+.B pending-probe
 or
 .BR enabled-probe .
 .TP
 .B /sys/kernel/photonicat-pm/pmu_charge_threshold_capability
 PMU charge threshold policy state (read-only). Values:
-.BR pending-probe
+.B pending-probe
 or
 .BR enabled-probe .
 .TP
 .B /sys/kernel/photonicat-pm/pmu_power_on_mode_capability
 PMU power-on mode policy state (read-only). Values:
-.BR pending-probe
+.B pending-probe
 or
 .BR enabled-probe .
 .TP
@@ -316,10 +309,10 @@ Serial port baud rate. Must match the PMU firmware's configured speed.
 Default: 115200.
 .TP
 .B force-poweroff-timeout
-Forced power off timeout in seconds (0\\-255). Sent to the PMU via
+Forced power off timeout in seconds (0\-255). Sent to the PMU via
 WATCHDOG_TIMEOUT_SET command at driver probe. When non-zero, the PMU will
 force power off after this many seconds following a software shutdown.
-Practical range is 0\\-60; values >60 are ineffective because the driver
+Practical range is 0\-60; values >60 are ineffective because the driver
 also sends a hardcoded 60 s watchdog timeout that triggers first.
 When set to 0, only the 60 s watchdog guards against hangs.
 Default: 0 (disabled).
@@ -355,20 +348,11 @@ The motherboard temperature is also registered as a kernel thermal zone
 above) when the device tree provides the required binding.
 .SH EXAMPLES
 .TP
-Read battery capacity:
-.B cat /sys/class/power_supply/battery/capacity
-.TP
-Read static design full charge capacity:
-.B cat /sys/class/power_supply/battery/energy_full
-.TP
-Read computed instantaneous power:
-.B cat /sys/class/power_supply/battery/power_now
-.TP
 Check that live energy is not exported:
 .B test ! \-e /sys/class/power_supply/battery/energy_now
 .TP
-Check fan management state:
-.B cat /sys/kernel/photonicat-pm/fan_state
+Stop charging at 80%:
+.B echo 80 > /sys/class/power_supply/battery/charge_control_end_threshold
 .TP
 Set fan to 50% from bash, zsh, or fish:
 .RS
@@ -387,25 +371,10 @@ echo "$speed" > "$fan_cdev/cur_state"
 .fi
 .RE
 .TP
-Check motion detection:
-.B cat /sys/kernel/photonicat-pm/movement_trigger
+Read the status LED state the PMU last acknowledged:
+.B sleep 1; cat /sys/kernel/photonicat-pm/status_led
 .TP
-Turn on status LED:
-.B echo 1 > /sys/kernel/photonicat-pm/status_led
-.TP
-Turn off beeper:
-.B echo 0 > /sys/kernel/photonicat-pm/beeper
-.TP
-Read PMU firmware version:
-.B cat /sys/kernel/photonicat-pm/pmu_fw_version
-.TP
-Read PMU RTC capability state:
-.B cat /sys/kernel/photonicat-pm/pmu_rtc_capability
-.TP
-Read power-on event:
-.B cat /sys/kernel/photonicat-pm/power_on_event
-.TP
-Set net LED blink pattern (50ms on, 50ms off):
+Set net LED blink pattern (50 ms on, 50 ms off):
 .B "echo 50 > /sys/kernel/photonicat-pm/net_status_led_on_time && echo 50 > /sys/kernel/photonicat-pm/net_status_led_off_time"
 .TP
 Power off now, automatically power on after 60 seconds:
@@ -413,9 +382,6 @@ Power off now, automatically power on after 60 seconds:
 .TP
 Power off now, automatically power on at the specified time:
 .B rtcwake -m off -t $(date -d \(dq2026-02-11 08:00:00\(dq +%s)
-.TP
-Enable charger auto-start:
-.B echo 1 > /sys/kernel/photonicat-pm/charger_on_auto_start
 .SH FILES
 .TP
 .I /dev/pcat-pm-ctl

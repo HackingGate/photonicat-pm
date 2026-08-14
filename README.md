@@ -4,37 +4,37 @@
 
 Linux kernel driver for the Photonicat 2 power management unit (PMU).
 
-See the [Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki)
-for MCU firmware inspection and flashing workflows.
+The PMU is a separate microcontroller (MCU) on the board. Its image is called
+"MCU firmware" in the wiki and vendor tooling; this README says "PMU firmware"
+throughout, matching the `pmu_fw_version` attribute. See the
+[Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki) for
+firmware inspection and flashing workflows.
 
 ## Scope
 
-This project is an independent Linux kernel driver. It is the host side of the
-UART link only. It does not build, sign, package, or distribute MCU firmware,
-and it cannot change how the MCU behaves once a command reaches it.
+This driver is the host side of the UART link only. It does not build, sign,
+package, or distribute PMU firmware, and it cannot change how the PMU behaves
+once a command reaches it.
 
-The MCU firmware itself is closed source and is published only as a wrapped
-binary image. The UART protocol it speaks is not: the vendor's userspace
-manager,
+The firmware is closed source and published only as a wrapped binary image. The
+UART protocol it speaks is not: the vendor's open-source userspace manager,
 [`photonicat/rockchip_rk3568_pcat_manager`](https://github.com/photonicat/rockchip_rk3568_pcat_manager),
-is open source and carries the command numbers and payload layouts in
-`src/pmu-manager.c`. That source, together with observation of the wire, is
-where this driver's protocol definitions come from.
+carries the command numbers and payload layouts in `src/pmu-manager.c`. That
+source, together with observation of the wire, is where this driver's protocol
+definitions come from.
 
-What is missing is a specification and any account of behavior. No document
-states which commands a given firmware version honors, what it does when it
-declines one, or which fields are trustworthy. The per-firmware results
-recorded below were established by testing against real hardware, and they can
-change between firmware versions without notice.
+No specification of behavior exists: no document states which commands a given
+firmware version honors, what it does when it declines one, or which fields are
+trustworthy. The per-firmware results below were established by testing real
+hardware and can change between firmware versions without notice.
 
-Firmware defects are therefore outside what this driver can fix. A PMU that
-ignores a command, reports a broken clock, or rolls back an update is behaving
-that way before the driver sees the response. Such behavior is documented here
-and in the wiki so users can recognize it, and should be reported to the
-vendor. Issues in this repository are for the driver: parsing, sysfs and ABI
-behavior, kernel integration, and packaging.
+Firmware defects are outside what this driver can fix — a PMU that ignores a
+command, reports a broken clock, or rolls back an update behaves that way before
+the driver sees the response. Report those to the vendor. Issues in this
+repository are for the driver: parsing, sysfs and ABI behavior, kernel
+integration, and packaging.
 
-## MCU Firmware Capability Policy
+## PMU Firmware Capability Policy
 
 The driver treats firmware behavior as runtime-observed capability or quirk
 detection, not as a static firmware-version allowlist or denylist.
@@ -67,38 +67,38 @@ detection, not as a static firmware-version allowlist or denylist.
   that reverts. Some firmware ignores the set command entirely and reports a
   constant state, which leaves both attributes uncontrollable.
 
-Per-firmware results are evidence for diagnostics, not feature gates:
+Per-firmware results are evidence for diagnostics, not feature gates.
+*Promotes* means the capability reached `enabled-probe`; *—* means not
+evaluated.
 
 | Firmware version | RTC and scheduled boot | Status LED and beeper control | Charge stop threshold | Power-on mode |
 |------------------|------------------------|-------------------------------|-----------------------|---------------|
-| `RA2E1250815002` | Promotes to `enabled-probe`; scheduled boot works. | Ignored; the PMU acknowledges state `0x01` whatever is requested. | Not evaluated. | Not evaluated. |
-| `RA2E1250918000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. | Not evaluated. | Not evaluated. |
-| `RA2E1260306000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. | Not evaluated. | Not evaluated. |
-| `RA2E1260515000` | Remains `pending-probe`; scheduled boot stays blocked by runtime validation. | Honored. | Not evaluated. | Not evaluated. |
-| `RA2E1260702000` | Promotes to `enabled-probe`; scheduled boot works. | Honored. | Promotes to `enabled-probe`; honored. Values below 50 or above 100 are refused by the PMU, and charging stops once the threshold is reached. | Promotes to `enabled-probe`; honored. Only `enabled` and `disabled` are accepted, and the initial `unconfigured` state cannot be restored. |
-| `RA2E1260730001` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
-| `RA2E1260813002` | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. | Not evaluated; the PMU does not stay on this firmware. |
+| `RA2E1250815002` | Promotes; scheduled boot works. | Ignored; the PMU acknowledges state `0x01` whatever is requested. | — | — |
+| `RA2E1250918000` | Promotes; scheduled boot works. | Honored. | — | — |
+| `RA2E1260306000` | Stays `pending-probe`; scheduled boot blocked. | Honored. | — | — |
+| `RA2E1260515000` | Stays `pending-probe`; scheduled boot blocked. | Honored. | — | — |
+| `RA2E1260702000` | Promotes; scheduled boot works. | Honored. | Promotes; honored. Values below 50 or above 100 are refused by the PMU, and charging stops once the threshold is reached. | Promotes; honored. Only `enabled` and `disabled` are accepted, and the initial `unconfigured` state cannot be restored. |
 
-Fan auto-speed reset is not per-firmware: no tested version exposes a trusted
-API for it, so it stays a prose caution under [Fan Control](#fan-control)
-rather than a column here.
+`RA2E1260730001` and `RA2E1260813002` are absent because the PMU does not stay
+on either firmware, so nothing could be evaluated.
 
-The PMU voltage threshold command (`VOLTAGE_THRESHOLD_SET`, `0x17`) — the LED,
-startup, charger limit, auto-shutdown and battery-full voltages the vendor
-manager configures — has no column because no driver feature depends on it.
-`RA2E1260702000` answers it with a refusal for every payload tested: the
-vendor's own 18-byte layout with plausible voltages, the same layout with
-zeros, a 16-byte variant, and a short 2-byte payload. The command number is
-kept in `photonicat-pm.h` for raw `/dev/pcat-pm-ctl` users, but the driver
-never sends it and exposes no attributes for it. There is also no command to
-read these thresholds back, so a firmware that did accept a write could not be
-verified.
+Two behaviors have no column:
 
-`pmu_hw_version` is reported by the running MCU firmware, not read from a
-board-independent identifier. The same board reported `NT2421A4` under
-`RA2E1260515000` and `NT2421A3` under `RA2E1250815002`. Treat
-`pmu_hw_version` as a firmware-reported string, not as a stable board
-revision.
+- **Fan auto-speed reset** is not per-firmware — no tested version exposes a
+  trusted API for it, so it is a prose caution under
+  [Fan Control](#fan-control).
+- **`VOLTAGE_THRESHOLD_SET` (`0x17`)**, the LED, startup, charger limit,
+  auto-shutdown and battery-full voltages the vendor manager configures, backs
+  no driver feature. `RA2E1260702000` refuses every payload tested (the
+  vendor's 18-byte layout with plausible voltages, the same layout zeroed, a
+  16-byte variant, a 2-byte payload), and no command reads the thresholds back,
+  so an accepted write could not be verified either. The command number stays
+  in `photonicat-pm.h` for raw `/dev/pcat-pm-ctl` users; the driver never sends
+  it.
+
+`pmu_hw_version` is a firmware-reported string, not a stable board revision:
+the same board reported `NT2421A4` under `RA2E1260515000` and `NT2421A3` under
+`RA2E1250815002`.
 
 ## Features
 
@@ -110,17 +110,13 @@ revision.
 | `/sys/class/power_supply/battery/charge_control_end_threshold` | Charge stop threshold in percent (read-write, 50–100). Stored in the PMU, so it survives driver reload and reboot. |
 | `/sys/class/power_supply/charger/` | Charger online status and input voltage (read-only). |
 
-Battery capacity follows the vendor driver parser: PMU protocol v2 status
-reports expose PMU SOC directly, while shorter status reports use the
-device-tree OCV capacity table as fallback.
-
 The charge stop threshold is enforced by the PMU, not by the driver: writing
 `charge_control_end_threshold` sends the value to the PMU and reports the
 result of the PMU's ACK. Values outside 50–100 are rejected with `EINVAL`
 before any command is sent, a PMU refusal returns `EIO`, and firmware without
 charge threshold support returns `ETIMEDOUT`. Reads return `ENODATA` until the
 PMU has answered a threshold query at least once; see
-[MCU Firmware Capability Policy](#mcu-firmware-capability-policy).
+[PMU Firmware Capability Policy](#pmu-firmware-capability-policy).
 
 > [!CAUTION]
 > PMU protocol v2 status-report energy values are not validated as live or
@@ -182,7 +178,7 @@ PMU has answered a threshold query at least once; see
 > either reading the requested state is not applied.
 >
 > Per-firmware results are in
-> [MCU Firmware Capability Policy](#mcu-firmware-capability-policy).
+> [PMU Firmware Capability Policy](#pmu-firmware-capability-policy).
 
 `status_led` and `beeper` reads report the state from the PMU's last ACK, not
 the value last written. A read issued immediately after a write returns the
@@ -391,24 +387,26 @@ The PMU has two fan speed modes:
 - **Unmanaged fan speed** — the PMU controls the fan based on its own internal logic (default).
 - **Managed fan speed** — the driver sends a SET command to lock the fan at a specific percentage (0–100%).
 
-You can achieve automatic-like behavior via software by defining a
+Temperature-driven control is available in software: define a
 [thermal zone](https://www.kernel.org/doc/html/latest/driver-api/thermal/sysfs-api.html)
-in the device tree that wires the board temperature sensor (via `#thermal-sensor-cells`)
-to the fan cooling device (via `#cooling-cells`). The kernel thermal governor then
-repeatedly sends SET commands based on temperature and trip points. See the
-[Device Tree example](#example) for a complete binding.
-However, when the system shuts down, the software stops and the PMU retains the
-last SET value.
+in the device tree wiring the board temperature sensor (via
+`#thermal-sensor-cells`) to the fan cooling device (via `#cooling-cells`), and
+the kernel thermal governor sends SET commands as the temperature crosses trip
+points. See the [Device Tree example](#example). Once the system shuts down the
+governor stops and the PMU retains the last SET value.
 
 > [!CAUTION]
-> Known affected firmware: all tested firmware versions up to and including
-> `RA2E1260515000`.
-> No trusted API is exposed to reset fan control back to PMU auto speed. The
-> steps below are workarounds to restore PMU auto speed.
+> Known affected firmware: all tested firmware versions.
+> No trusted API is exposed to reset fan control back to PMU auto speed; the
+> steps below are workarounds.
 >
-> Due to that firmware limitation, this driver's `unmanaged` state only means the driver has not sent a fan SET command since loading. It may sometimes mean the PMU retained the last fixed speed instead of returning to PMU auto speed.
+> Because of that, `unmanaged` only means the driver has not sent a fan SET
+> command since loading — the PMU may still be holding a fixed speed set
+> earlier.
 >
-> When in managed fan speed, after shutdown, the fan stays at the last fixed speed and will not adjust on its own. If the retained speed is low and the device is still charging or otherwise thermally active, this can be unsafe for thermal management.
+> After a shutdown in managed fan speed, the fan stays at the last fixed speed
+> and will not adjust on its own. A low retained speed on a device that is still
+> charging or otherwise thermally active is unsafe.
 >
 > To restore PMU auto speed:
 >
@@ -429,15 +427,15 @@ Check whether the driver has set a fixed speed:
 cat /sys/kernel/photonicat-pm/fan_state
 ```
 
-`unmanaged` is the driver-local state described in the caution above. A value
-from 0 to 100 is the managed fan speed percentage set by the driver.
+A value from 0 to 100 is the managed fan speed percentage set by the driver;
+`unmanaged` is the driver-local state described in the caution above.
 
-The following commands can be pasted from `bash`, `zsh`, or `fish`. They run the
-write through `sudo sh -c` so the privileged shell performs the `cur_state`
-redirection.
+The snippets below run the write through `sudo sh -c` so the privileged shell
+performs the `cur_state` redirection, which makes them safe to paste into
+`bash`, `zsh`, or `fish`.
 
 Set fan speed (switches PMU to managed speed). Replace the final argument with
-the fixed speed percentage to set; use `100` for maximum:
+the percentage to set; use `100` for maximum:
 
 ```sh
 sudo sh -c '
@@ -468,46 +466,19 @@ cat "$fan_cdev/cur_state"
 '
 ```
 
-### Movement Detection
+### Status LED and Beeper
+
+`status_led` and `beeper` take 1 or 0, and read back the state from the PMU's
+last ACK, so a read needs about a second to reflect a write:
 
 ```bash
-cat /sys/kernel/photonicat-pm/movement_trigger
-# 1 (motion detected) or 0 (idle)
-```
-
-### Status LED Control
-
-```bash
-# Turn on status LED
-echo 1 > /sys/kernel/photonicat-pm/status_led
-
-# Turn off status LED
 echo 0 > /sys/kernel/photonicat-pm/status_led
-
-# Read current status LED state, once the PMU ACK has landed
 sleep 1
 cat /sys/kernel/photonicat-pm/status_led
 ```
 
-On firmware that refuses the write, the read returns 1 again after the ACK.
-See the caution under [LEDs & Peripherals](#leds--peripherals).
-
-### Beeper Control
-
-```bash
-# Turn on beeper
-echo 1 > /sys/kernel/photonicat-pm/beeper
-
-# Turn off beeper
-echo 0 > /sys/kernel/photonicat-pm/beeper
-
-# Read current beeper state, once the PMU ACK has landed
-sleep 1
-cat /sys/kernel/photonicat-pm/beeper
-```
-
-On firmware that ignores the set command, the read returns the PMU's constant
-state instead of the requested one. See the caution under
+On firmware that refuses the write, the read returns the PMU's constant state
+instead of the requested one — for `status_led` that is 1. See the caution under
 [LEDs & Peripherals](#leds--peripherals).
 
 ### PMU Hardware / Firmware Version
@@ -518,30 +489,22 @@ cat /sys/kernel/photonicat-pm/pmu_fw_version
 cat /sys/kernel/photonicat-pm/pmu_rtc_capability
 ```
 
-The driver also forwards the raw PMU hardware/firmware version ACK frames
-to `/dev/pcat-pm-ctl` for tools that query the PMU through the control
-device. The sysfs attributes above are still updated internally by the
-driver.
-
-### Power-on Event
-
-```bash
-cat /sys/kernel/photonicat-pm/power_on_event
-# 0 = unknown, 1 = power button, 2 = scheduled, 3 = charger connected, 4 = USB
-```
+The raw version ACK frames are also forwarded to `/dev/pcat-pm-ctl` for tools
+that query the PMU through the control device.
 
 ### Schedule Boot
 
-The driver registers an RTC device with alarm support. When an RTC alarm is set, the driver sends the alarm time to the PMU via UART (`SCHEDULE_STARTUP_TIME_SET`). The PMU stores this schedule and will power on the board at the specified time, even when the system is fully powered off. The alarm is one-shot (non-recurring).
-All firmware starts in `pending-probe`; `/dev/rtc0` remains registered, but RTC
-reads report invalid data and alarm programming fails until the driver observes
-three consecutive valid, advancing PMU RTC samples and promotes the capability
-to `enabled-probe`. No firmware version string enables RTC or scheduled boot by
-itself.
-Raw scheduled-boot commands sent through `/dev/pcat-pm-ctl` are gated by the
-same RTC capability state.
+The driver registers an RTC device with alarm support. Setting an alarm sends
+the time to the PMU (`SCHEDULE_STARTUP_TIME_SET`), which stores it and powers on
+the board at that time even from a full power-off. The alarm is one-shot.
 
-This integrates with standard Linux RTC tools such as `rtcwake(8)`:
+All firmware starts in `pending-probe`: `/dev/rtc0` stays registered, but reads
+report invalid data and alarm programming fails until the driver observes three
+consecutive valid, advancing PMU RTC samples. Raw scheduled-boot commands
+through `/dev/pcat-pm-ctl` are gated the same way, and no firmware version
+string enables either by itself.
+
+Works with standard Linux RTC tools such as `rtcwake(8)`:
 
 ```bash
 # Power off now, automatically power on after 60 seconds
@@ -574,19 +537,6 @@ echo 100 > /sys/kernel/photonicat-pm/net_status_led_on_time
 echo 0 > /sys/kernel/photonicat-pm/net_status_led_off_time
 ```
 
-### Charger Auto-Start
-
-```bash
-# Enable auto-start when charger is connected
-echo 1 > /sys/kernel/photonicat-pm/charger_on_auto_start
-
-# Disable
-echo 0 > /sys/kernel/photonicat-pm/charger_on_auto_start
-
-# Read current state
-cat /sys/kernel/photonicat-pm/charger_on_auto_start
-```
-
 ### Power-On Mode
 
 ```bash
@@ -611,10 +561,8 @@ echo disabled > /sys/kernel/photonicat-pm/power_on_mode
 ### Control Device (`/dev/pcat-pm-ctl`)
 
 Raw escape hatch for advanced PMU commands using the binary serial protocol.
-Userspace can read selected raw PMU responses from this device, including
-the PMU hardware/firmware version ACK frames used by
-`pcat-pmu-updater --pmu-fw-version-get`.
-See `pcat-pm-ctl(4)` man page for frame format and details.
+See the `pcat-pm-ctl(4)` man page for the frame format, the commands the driver
+refuses to forward, and the responses that can be read back.
 
 ## Protocol
 
@@ -642,9 +590,8 @@ See `photonicat-pm.h` for command definitions.
 
 ## Debug Logging
 
-PMU command logging uses the kernel `dev_dbg` facility. Messages are
-compiled out (or dynamically off) by default, producing no overhead in
-production.
+PMU command logging uses the kernel `dev_dbg` facility. Messages are compiled
+out, or dynamically off, by default.
 
 ### Runtime (Dynamic Debug)
 
