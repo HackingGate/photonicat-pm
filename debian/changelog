@@ -1,3 +1,19 @@
+photonicat-pm (1.0.5-1) unstable; urgency=medium
+
+  * Expose the PMU charge stop threshold as the standard battery power
+    supply attribute charge_control_end_threshold (50-100%).
+  * Expose the PMU power-on mode as power_on_mode, reading unconfigured,
+    enabled, or disabled.
+  * Report both features through the runtime capability policy, with new
+    pmu_charge_threshold_capability and pmu_power_on_mode_capability
+    attributes.
+  * Block raw CHARGE_THRESHOLD_SET and POWER_ON_MODE_V2_SET frames on
+    /dev/pcat-pm-ctl so the exported state cannot drift from the PMU.
+  * Document that RA2E1260702000 refuses VOLTAGE_THRESHOLD_SET for every
+    payload tested, so the driver does not send it.
+
+ -- HackingGate <i@hackinggate.com>  Fri, 14 Aug 2026 23:04:32 +0900
+
 photonicat-pm (1.0.4-1) unstable; urgency=medium
 
   * Document verified PMU firmware RA2E1260515000 RTC behavior.
