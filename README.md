@@ -222,9 +222,9 @@ host in the first place.
 > still cut short. A host that hangs without announcing a shutdown is caught
 > by the 60 s heartbeat watchdog in every mode.
 >
-> Boards whose device tree leaves `force-poweroff-timeout` unset were never
-> exposed to this; the property defaults to 0. Armbian's Photonicat 2 device
-> tree sets it to 60.
+> Boards whose device tree leaves `force-poweroff-timeout` unset are
+> unaffected either way; the property defaults to 0. Armbian's Photonicat 2
+> device tree sets it to 60.
 
 ### PMU Information
 
