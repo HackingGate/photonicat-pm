@@ -254,9 +254,18 @@ static int pcat_pm_probe(struct serdev_device *serdev)
 				    &pm_data->force_poweroff_timeout))
 		pm_data->force_poweroff_timeout = 0;
 
+	/* Losing the input device is not worth losing battery, RTC, and the
+	 * rest of the driver, but staying in input mode without one would
+	 * turn every press into a silent kernel poweroff. Fall back to
+	 * poweroff mode, which also keeps the force power off timeout armed.
+	 */
 	ret = pcat_pm_input_probe(pm_data);
-	if (ret)
-		dev_err(dev, "Failed to register power button input: %d\n", ret);
+	if (ret) {
+		dev_err(dev,
+			"Failed to register power button input: %d, using poweroff mode.\n",
+			ret);
+		pm_data->button_mode = PCAT_PM_BUTTON_MODE_POWEROFF;
+	}
 
 	serdev_device_set_drvdata(serdev, pm_data);
 	serdev_device_set_client_ops(serdev, &pcat_pm_serdev_ops);

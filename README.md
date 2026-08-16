@@ -209,7 +209,7 @@ seconds sends the request. A stray press in a bag therefore never reaches the
 host in the first place.
 
 > [!IMPORTANT]
-> The PMU applies [`force-poweroff-timeout`](#device-tree-properties) to a
+> The PMU applies [`force-poweroff-timeout`](#optional-properties) to a
 > shutdown it announces itself, not only to one the host announces. Once it
 > has sent `PMU_REQUEST_SHUTDOWN` it stops reporting status and cuts power
 > that many seconds later whatever the host does. On RA2E1260702000 that was
