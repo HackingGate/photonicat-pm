@@ -161,12 +161,10 @@ void pcat_pm_button_event(struct pcat_pm_data *pm_data)
 		input_sync(pm_data->input);
 		input_report_key(pm_data->input, KEY_POWER, 0);
 		input_sync(pm_data->input);
-		WRITE_ONCE(pm_data->watchdog_rearm_pending, true);
 		break;
 
 	case PCAT_PM_BUTTON_MODE_IGNORE:
 		dev_info(dev, "PMU request shutdown ignored.\n");
-		WRITE_ONCE(pm_data->watchdog_rearm_pending, true);
 		break;
 
 	case PCAT_PM_BUTTON_MODE_POWEROFF:

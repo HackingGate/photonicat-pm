@@ -11,9 +11,6 @@
 
 #include "photonicat-pm.h"
 
-static void pcat_pm_watchdog_timeout_set(struct pcat_pm_data *pm_data,
-	u8 interval, long timeout);
-
 /**
  * pcat_pm_check_work - Periodic worker function
  * @work: kthread_work structure
@@ -33,24 +30,6 @@ static void pcat_pm_check_work(struct kthread_work *work)
 			NULL, 0, false, 0);
 
 	now = ktime_get_boottime_ns();
-
-	/* The PMU force-cuts power about a minute after it announces a
-	 * power button press. In input/ignore modes the host may decline,
-	 * so keep re-sending the watchdog config to defer the cut.
-	 */
-	if (pm_data->work_flag &&
-		READ_ONCE(pm_data->watchdog_rearm_pending) &&
-		now >= pm_data->watchdog_rearm_timestamp + 30 * NSEC_PER_SEC) {
-		if (!pm_data->watchdog_rearm_timestamp)
-			dev_info(&pm_data->serdev->dev,
-				"Re-arming PMU watchdog to defer force shutdown.\n");
-		else
-			dev_dbg(&pm_data->serdev->dev,
-				"Re-arming PMU watchdog.\n");
-		pcat_pm_watchdog_timeout_set(pm_data,
-			PCAT_PM_WATCHDOG_DEFAULT_INTERVAL, 0);
-		pm_data->watchdog_rearm_timestamp = now;
-	}
 
 	mutex_lock(&pm_data->mutex);
 	if (now >= pm_data->status_report_timestamp + 15 * NSEC_PER_SEC &&
@@ -92,6 +71,26 @@ static enum hrtimer_restart pcat_pm_check_timer_expired(struct hrtimer *timer)
 }
 
 /**
+ * pcat_pm_watchdog_timeout_send - Send watchdog configuration to the PMU
+ * @pm_data: Driver data
+ * @force_poweroff_timeout: Seconds after a shutdown is announced before the
+ *	PMU cuts power regardless of the host (0 to disable)
+ * @interval: Heartbeat interval in seconds (0 to disable)
+ * @timeout: UART write timeout in jiffies
+ *
+ * Most callers want pcat_pm_watchdog_timeout_set(), which picks
+ * @force_poweroff_timeout to match the power button mode.
+ */
+static void pcat_pm_watchdog_timeout_send(struct pcat_pm_data *pm_data,
+	u8 force_poweroff_timeout, u8 interval, long timeout)
+{
+	u8 timeouts[3] = {60, force_poweroff_timeout, interval};
+
+	pcat_pm_uart_write_data(pm_data, PCAT_PM_COMMAND_WATCHDOG_TIMEOUT_SET,
+		timeouts, 3, true, timeout);
+}
+
+/**
  * pcat_pm_watchdog_timeout_set - Configure PMU watchdog timeouts
  * @pm_data: Driver data
  * @interval: Heartbeat interval in seconds (0 to disable)
@@ -99,14 +98,27 @@ static enum hrtimer_restart pcat_pm_check_timer_expired(struct hrtimer *timer)
  *
  * Sends watchdog configuration to PMU. The PMU will power off the
  * system if heartbeats stop arriving within the configured timeout.
+ *
+ * The PMU applies force-poweroff-timeout to a shutdown it announces itself
+ * as well as to one the host announces: after sending PMU_REQUEST_SHUTDOWN
+ * it stops reporting status and cuts power that many seconds later, whatever
+ * the host does. That is wanted in poweroff mode, where the driver is going
+ * down anyway, but in input and ignore modes the host owns the decision, so
+ * the timeout is sent as 0 and the PMU arms nothing. pcat_pm_do_poweroff()
+ * restores the configured value before the host announces its own shutdown,
+ * which keeps the safety net for a shutdown that hangs. A host that hangs
+ * without announcing anything is still caught by the heartbeat watchdog.
  */
 static void pcat_pm_watchdog_timeout_set(struct pcat_pm_data *pm_data,
 	u8 interval, long timeout)
 {
-	u8 timeouts[3] = {60, pm_data->force_poweroff_timeout, interval};
+	u8 force_poweroff_timeout = pm_data->force_poweroff_timeout;
 
-	pcat_pm_uart_write_data(pm_data, PCAT_PM_COMMAND_WATCHDOG_TIMEOUT_SET,
-		timeouts, 3, true, timeout);
+	if (pm_data->button_mode != PCAT_PM_BUTTON_MODE_POWEROFF)
+		force_poweroff_timeout = 0;
+
+	pcat_pm_watchdog_timeout_send(pm_data, force_poweroff_timeout, interval,
+		timeout);
 }
 
 /**
@@ -140,6 +152,15 @@ static int pcat_pm_do_poweroff(struct sys_off_data *data)
 
 	pm_data->work_flag = false;
 	pcat_pm_worker_stop(pm_data);
+
+	/* Outside poweroff mode the force power off timeout is kept disarmed
+	 * while the host runs, so arm it for the shutdown about to start.
+	 */
+	if (pm_data->button_mode != PCAT_PM_BUTTON_MODE_POWEROFF)
+		pcat_pm_watchdog_timeout_send(pm_data,
+			pm_data->force_poweroff_timeout,
+			PCAT_PM_WATCHDOG_DEFAULT_INTERVAL,
+			msecs_to_jiffies(1000));
 
 	pcat_pm_uart_write_data(pm_data, PCAT_PM_COMMAND_HOST_REQUEST_SHUTDOWN,
 		NULL, 0, true, msecs_to_jiffies(1000));

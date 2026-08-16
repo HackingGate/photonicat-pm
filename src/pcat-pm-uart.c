@@ -477,8 +477,10 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 
 	case PCAT_PM_COMMAND_PMU_REQUEST_SHUTDOWN:
 		pcat_pm_button_event(pm_data);
-		/* The ACK may read as "host agreed, cut power", so send it
-		 * only in poweroff mode, where the host is going down anyway.
+		/* What the PMU makes of this ACK is untested, and it may read
+		 * as "host agreed, cut power". Send it only in poweroff mode,
+		 * where the host is going down anyway; declining the press has
+		 * only been tested with the ACK suppressed.
 		 */
 		if (pm_data->button_mode != PCAT_PM_BUTTON_MODE_POWEROFF)
 			need_ack = false;

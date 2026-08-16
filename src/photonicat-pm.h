@@ -297,11 +297,11 @@ struct pcat_pm_fw_caps {
  * @poweroff_ok: Shutdown acknowledged by PMU
  * @fan_set_ok: Fan set acknowledged by PMU
  * @baudrate: Serial port baud rate (default 115200)
- * @force_poweroff_timeout: Forced power off timeout in seconds
+ * @force_poweroff_timeout: Forced power off timeout in seconds, as configured
+ *	by the device tree. Sent to the PMU only while @button_mode is
+ *	poweroff, and by the shutdown handler; see
+ *	pcat_pm_watchdog_timeout_set()
  * @button_mode: Response to a PMU power button press
- * @watchdog_rearm_pending: Keep re-sending the watchdog config to defer the
- *	PMU's post-request force shutdown (input/ignore modes)
- * @watchdog_rearm_timestamp: Last watchdog re-send time (ns)
  * @write_framenum: Incrementing frame number for sent packets
  * @read_buffer: UART receive buffer
  * @read_buffer_used: Bytes used in receive buffer
@@ -393,8 +393,6 @@ struct pcat_pm_data {
 	u32 baudrate;
 	u32 force_poweroff_timeout;
 	enum pcat_pm_button_mode button_mode;
-	bool watchdog_rearm_pending;
-	u64 watchdog_rearm_timestamp;
 	bool work_flag;
 	bool poweroff_ok;
 	bool fan_set_ok;

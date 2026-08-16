@@ -10,12 +10,20 @@ photonicat-pm (1.0.6-1) unstable; urgency=medium
     reboot.
   * Document that the PMU never announces a button release, so userspace
     sees every press as a short press.
-  * After a press in input or ignore mode, suppress the protocol ACK and
-    re-send the watchdog configuration every 30 seconds to try to defer
-    the PMU's force shutdown.
+  * Stop the PMU from force-cutting power after a button press the host
+    is allowed to decline. The PMU applies force-poweroff-timeout to the
+    shutdown it announces itself, not only to one the host announces, so
+    outside poweroff mode the driver now sends 0 for that timeout while
+    the system is running and restores the configured value in the
+    shutdown handler. Without this a press cut power after the configured
+    timeout even with the host declining; measured at 62 seconds with the
+    property set to 60 and 125 seconds with it set to 120.
+  * Suppress the protocol ACK for a press in input or ignore mode.
+  * Correct the force-poweroff-timeout documentation: values above 60 are
+    not capped by the 60 second heartbeat watchdog, which fires only when
+    heartbeats stop.
   * Record RA2E1260702000 button behavior: presses shorter than about
-    three seconds send nothing, and the PMU cuts power about 60 seconds
-    after announcing a press regardless of the host's response.
+    three seconds send nothing at all.
 
  -- HackingGate <i@hackinggate.com>  Sun, 16 Aug 2026 19:30:00 +0900
 

@@ -234,13 +234,20 @@ The firmware debounces the button itself: on RA2E1260702000 a quick tap or
 a hold under about two seconds sends nothing, and a hold of about three
 seconds sends the request.
 .PP
-On RA2E1260702000 the host cannot decline: about 60 seconds after
-announcing the request the PMU cuts power regardless of what the host does,
-so \(dqinput\(dq and \(dqignore\(dq turn a clean shutdown into an unclean
-one on this firmware. The driver re-sends the watchdog configuration every
-30 seconds after a press to try to defer the cut, but this has not been
-confirmed to help. Confirm behavior on the running firmware before
-deploying either mode.
+The PMU applies
+.B force-poweroff-timeout
+to a shutdown it announces itself, not only to one the host announces.
+Once it has sent PMU_REQUEST_SHUTDOWN it stops reporting status and cuts
+power that many seconds later whatever the host does; on RA2E1260702000
+that was 62 seconds with the property set to 60 and 125 seconds with it set
+to 120.
+.PP
+So that a press the host declines does not become a power cut, the driver
+sends 0 for that timeout while the system is running in \(dqinput\(dq or
+\(dqignore\(dq mode, and restores the configured value in the shutdown
+handler. A press then leaves the PMU running normally, and a shutdown that
+hangs is still cut short. A host that hangs without announcing a shutdown
+is caught by the 60 s heartbeat watchdog in every mode.
 .SS PMU Information
 .TP
 .B /sys/kernel/photonicat-pm/pmu_hw_version
@@ -338,11 +345,16 @@ Default: 115200.
 .TP
 .B force-poweroff-timeout
 Forced power off timeout in seconds (0\-255). Sent to the PMU via
-WATCHDOG_TIMEOUT_SET command at driver probe. When non-zero, the PMU will
-force power off after this many seconds following a software shutdown.
-Practical range is 0\-60; values >60 are ineffective because the driver
-also sends a hardcoded 60 s watchdog timeout that triggers first.
-When set to 0, only the 60 s watchdog guards against hangs.
+WATCHDOG_TIMEOUT_SET command at driver probe. When non-zero, the PMU cuts
+power this many seconds after a shutdown is announced \(em by the host, and
+also by the PMU itself when the power button is pressed.
+The 60 s heartbeat watchdog does not cap it: that one fires only when
+heartbeats stop, and 120 here measured a 125 s cut.
+Outside
+.B pmu-button-mode
+\(dqpoweroff\(dq the driver sends 0 while the system is running and the
+configured value at shutdown, so a declined button press is not a power
+cut. When set to 0, only the heartbeat watchdog guards against hangs.
 Default: 0 (disabled).
 .TP
 .B pmu-button-mode
