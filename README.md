@@ -219,8 +219,11 @@ host in the first place.
 > sends 0 for that timeout while the system is running in `input` or
 > `ignore` mode, and restores the configured value in the shutdown handler.
 > A press then leaves the PMU running normally, and a shutdown that hangs is
-> still cut short. A host that hangs without announcing a shutdown is caught
-> by the 60 s heartbeat watchdog in every mode.
+> still cut short. A kernel hang is caught by the 60 s heartbeat watchdog in
+> every mode. A hung userspace is not: in `input` mode the button then only
+> queues an event nobody reads, and the firmware has no hard-cutoff hold, so
+> recovery is SysRq, the serial console, or disconnecting power —
+> `poweroff` mode forces the shutdown from the kernel instead.
 >
 > Boards whose device tree leaves `force-poweroff-timeout` unset are
 > unaffected either way; the property defaults to 0. Armbian's Photonicat 2

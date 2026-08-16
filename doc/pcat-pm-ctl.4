@@ -246,8 +246,12 @@ So that a press the host declines does not become a power cut, the driver
 sends 0 for that timeout while the system is running in \(dqinput\(dq or
 \(dqignore\(dq mode, and restores the configured value in the shutdown
 handler. A press then leaves the PMU running normally, and a shutdown that
-hangs is still cut short. A host that hangs without announcing a shutdown
-is caught by the 60 s heartbeat watchdog in every mode.
+hangs is still cut short. A kernel hang is caught by the 60 s heartbeat
+watchdog in every mode. A hung userspace is not: in \(dqinput\(dq mode the
+button then only queues an event nobody reads, and the firmware has no
+hard-cutoff hold, so recovery is SysRq, the serial console, or
+disconnecting power; \(dqpoweroff\(dq mode forces the shutdown from the
+kernel instead.
 .SS PMU Information
 .TP
 .B /sys/kernel/photonicat-pm/pmu_hw_version
