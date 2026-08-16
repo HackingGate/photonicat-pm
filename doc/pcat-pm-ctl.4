@@ -81,10 +81,10 @@ while the capability is pending. Writes are not gated on the probe: firmware
 without support does not answer, so the write fails with
 .BR ETIMEDOUT .
 .PP
-Current firmware honors every gated feature, so a capability that stays
+A capability that stays
 .B pending-probe
-means the running firmware is older than the driver expects. Per-firmware
-results are recorded in the project wiki:
+means the running firmware did not answer the driver's probe for it.
+Per-firmware results are recorded in the project wiki:
 .PP
 .RS
 .nf

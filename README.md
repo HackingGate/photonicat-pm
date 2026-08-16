@@ -25,9 +25,9 @@ definitions come from.
 
 No specification of behavior exists: no document states which commands a given
 firmware version honors, what it does when it declines one, or which fields are
-trustworthy. Everything here describes current firmware, established by testing
-real hardware; behavior can change between firmware versions without notice.
-Results for older firmware are recorded under
+trustworthy. Everything here is established by testing real hardware;
+behavior can change between firmware versions without notice.
+Which firmware versions were tested is recorded under
 [MCU Firmware Observed Behavior](https://github.com/HackingGate/photonicat-pm/wiki/MCU-Firmware-Observed-Behavior)
 in the wiki.
 
@@ -70,12 +70,12 @@ detection, not as a static firmware-version allowlist or denylist.
   that reverts. Some firmware ignores the set command entirely and reports a
   constant state, which leaves both attributes uncontrollable.
 
-Current firmware honors all four gated features, so a capability that stays
-`pending-probe` means the running firmware is older than the driver expects.
-Which version fails which feature is recorded in
+A capability that stays `pending-probe` means the running firmware did not
+answer the driver's probe for it. Which versions were tested against which
+feature is recorded in
 [MCU Firmware Observed Behavior](https://github.com/HackingGate/photonicat-pm/wiki/MCU-Firmware-Observed-Behavior),
-along with the wiki's flashing instructions. Two limitations survive on current
-firmware:
+along with the wiki's flashing instructions. Two limitations are not
+version-specific:
 
 - **Fan auto-speed reset**: no firmware exposes a trusted API for it, so
   restoring PMU auto speed needs the workarounds under
