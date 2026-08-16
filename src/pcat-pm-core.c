@@ -106,8 +106,10 @@ static void pcat_pm_watchdog_timeout_send(struct pcat_pm_data *pm_data,
  * down anyway, but in input and ignore modes the host owns the decision, so
  * the timeout is sent as 0 and the PMU arms nothing. pcat_pm_do_poweroff()
  * restores the configured value before the host announces its own shutdown,
- * which keeps the safety net for a shutdown that hangs. A host that hangs
- * without announcing anything is still caught by the heartbeat watchdog.
+ * which keeps the safety net for a shutdown that hangs, and
+ * pcat_pm_pm_suspend() arms it across suspend, when the host cannot answer a
+ * press. A host that hangs without announcing anything is still caught by
+ * the heartbeat watchdog.
  */
 static void pcat_pm_watchdog_timeout_set(struct pcat_pm_data *pm_data,
 	u8 interval, long timeout)
@@ -363,7 +365,8 @@ static int pcat_pm_probe(struct serdev_device *serdev)
  * pcat_pm_pm_suspend - System suspend handler
  * @dev: Device
  *
- * Disables watchdog during suspend.
+ * Disables the heartbeat watchdog during suspend while keeping the force
+ * power off timeout armed.
  *
  * Return: 0
  */
@@ -371,7 +374,14 @@ static int pcat_pm_pm_suspend(struct device *dev)
 {
 	struct pcat_pm_data *pm_data = dev_get_drvdata(dev);
 
-	pcat_pm_watchdog_timeout_set(pm_data, 0, 0);
+	/* A suspended host cannot service the button, so bypass the mode gate
+	 * in pcat_pm_watchdog_timeout_set() and arm the force power off
+	 * timeout in every mode: the PMU cutting power that many seconds
+	 * after announcing the shutdown is the only recovery from a suspend
+	 * that never wakes. Resume goes back through the mode gate.
+	 */
+	pcat_pm_watchdog_timeout_send(pm_data, pm_data->force_poweroff_timeout,
+		0, 0);
 
 	return 0;
 }
@@ -413,6 +423,11 @@ static const struct dev_pm_ops pcat_pm_pm_ops = {
 static void pcat_pm_remove(struct serdev_device *serdev)
 {
 	struct pcat_pm_data *pm_data = serdev_device_get_drvdata(serdev);
+
+	/* Disarm the heartbeat watchdog before heartbeats stop, or the PMU
+	 * cuts power to the still-running system about a minute after rmmod.
+	 */
+	pcat_pm_watchdog_timeout_set(pm_data, 0, msecs_to_jiffies(1000));
 
 	pm_data->work_flag = false;
 	pcat_pm_worker_stop(pm_data);

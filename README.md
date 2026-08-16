@@ -217,7 +217,11 @@ host in the first place.
 >
 > So that a press the host declines does not become a power cut, the driver
 > sends 0 for that timeout while the system is running in `input` or
-> `ignore` mode, and restores the configured value in the shutdown handler.
+> `ignore` mode, and restores the configured value in the shutdown handler
+> and across suspend. A suspended host cannot service the button, so a press
+> while suspended cuts power after the timeout in every mode — with button
+> wake unverified, that is also the only way to recover a suspend that never
+> wakes.
 > A press then leaves the PMU running normally, and a shutdown that hangs is
 > still cut short. A kernel hang is caught by the 60 s heartbeat watchdog in
 > every mode. A hung userspace is not: in `input` mode the button then only
@@ -381,7 +385,7 @@ battery: battery {
 | `power-gpio` | GPIO | (none) | Hardware | GPIO pin wired to PMU power-sense input. Pulled low at shutdown to signal the PMU. Get the pin from the board schematic; omit if no such wire exists. |
 | `baudrate` | `<u32>` | 115200 | Hardware | UART baud rate. Must match the PMU firmware's configured speed. |
 | `pm-version` | `<u32>` | 1 | Hardware | PMU protocol version (1 or 2). Determined by the PMU firmware on the board. Version 2 adds battery current and PMU-reported capacity. |
-| `force-poweroff-timeout` | `<u32>` | 0 (disabled) | Config | Forced power-off timeout in seconds (0–255). Sent to the PMU via `WATCHDOG_TIMEOUT_SET` command at driver probe. When non-zero, the PMU cuts power this many seconds after a shutdown is announced — by the host, and also by the PMU itself when the power button is pressed. The 60s heartbeat watchdog does not cap it: that one only fires when heartbeats stop, and 120 here measured a 125s cut. Outside `pmu-button-mode = "poweroff"` the driver sends 0 while the system is running and the configured value at shutdown, so a declined button press is not a power cut; see [Power Button](#power-button). Safety net for stuck shutdowns. |
+| `force-poweroff-timeout` | `<u32>` | 0 (disabled) | Config | Forced power-off timeout in seconds (0–255). Sent to the PMU via `WATCHDOG_TIMEOUT_SET` command at driver probe. When non-zero, the PMU cuts power this many seconds after a shutdown is announced — by the host, and also by the PMU itself when the power button is pressed. The 60s heartbeat watchdog does not cap it: that one only fires when heartbeats stop, and 120 here measured a 125s cut. Outside `pmu-button-mode = "poweroff"` the driver sends 0 while the system is running and the configured value at shutdown and during suspend, so a declined button press is not a power cut; see [Power Button](#power-button). Safety net for stuck shutdowns. |
 | `pmu-button-mode` | string | `"poweroff"` | Config | What the driver does when the PMU reports a power button press: `"poweroff"` calls `orderly_poweroff()` from the driver, `"input"` reports `KEY_POWER` on an input device and leaves the decision to userspace, `"ignore"` logs the press and does nothing. An unrecognized value falls back to `"poweroff"` with a warning. Overridden by the `button_mode` module parameter when that is set. See [Power Button](#power-button). |
 | `#thermal-sensor-cells` | `<0>` | (not set) | Config | Exposes the motherboard temperature to the kernel thermal framework. Must be `<0>` (no per-sensor arguments). Required when a `thermal-zones` binding in the board DTS references this node via `thermal-sensors`. Without this, the driver still registers an hwmon sensor but no thermal zone. |
 
