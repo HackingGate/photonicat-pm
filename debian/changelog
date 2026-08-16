@@ -24,6 +24,10 @@ photonicat-pm (1.0.6-1) unstable; urgency=medium
     heartbeats stop.
   * Record RA2E1260702000 button behavior: presses shorter than about
     three seconds send nothing at all.
+  * Return the license to GPL-2.0-or-later, matching the original driver
+    and the MODULE_LICENSE declaration. The GPL-3.0-or-later relabel was
+    incompatible with the GPL-2.0-only kernel and would have blocked any
+    kernel-adjacent distribution.
 
  -- HackingGate <i@hackinggate.com>  Sun, 16 Aug 2026 19:30:00 +0900
 
