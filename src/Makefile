@@ -8,6 +8,7 @@ photonicat-pm-y := pcat-pm-core.o \
                    pcat-pm-rtc.o \
                    pcat-pm-hwmon.o \
                    pcat-pm-fan.o \
+                   pcat-pm-input.o \
                    pcat-pm-ctl.o \
                    pcat-pm-sysfs.o
 

@@ -9,6 +9,7 @@
  *  - Real-Time Clock & Scheduled Boot: RTC backed by PMU, alarm-based wake
  *  - Sensors & Fan: motherboard temperature, fan RPM, thermal cooling control
  *  - LEDs & Peripherals: status LED, beeper, network status LED, motion detection
+ *  - Power Button: driver poweroff, KEY_POWER input event, or ignore
  *  - PMU Information: hardware/firmware version, power-on event
  *  - Configuration: charger auto-start
  *  - Advanced: raw PMU command interface (/dev/pcat-pm-ctl)
@@ -27,6 +28,7 @@
 #include <linux/mod_devicetable.h>
 #include <linux/slab.h>
 #include <linux/gpio/consumer.h>
+#include <linux/input.h>
 #include <linux/of.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
@@ -248,6 +250,21 @@ static inline const char *pcat_pm_rtc_capability_name(
 	}
 }
 
+/**
+ * enum pcat_pm_button_mode - Response to a PMU power button press
+ * @PCAT_PM_BUTTON_MODE_POWEROFF: Power the system off from the driver
+ * @PCAT_PM_BUTTON_MODE_INPUT: Report KEY_POWER and let userspace decide
+ * @PCAT_PM_BUTTON_MODE_IGNORE: Log the press and do nothing else
+ *
+ * Selected by the pmu-button-mode device tree property. The order matches
+ * the property's string values, which pcat-pm-input.c indexes by.
+ */
+enum pcat_pm_button_mode {
+	PCAT_PM_BUTTON_MODE_POWEROFF = 0,
+	PCAT_PM_BUTTON_MODE_INPUT,
+	PCAT_PM_BUTTON_MODE_IGNORE,
+};
+
 struct pcat_pm_fw_caps {
 	enum pcat_pm_rtc_capability rtc_capability;
 	enum pcat_pm_probe_capability charge_threshold_capability;
@@ -268,6 +285,7 @@ struct pcat_pm_fw_caps {
  * @hwmon_temp_mb_dev: Hwmon device for motherboard temperature
  * @hwmon_speed_fan_dev: Hwmon device for fan speed
  * @tzdev: Thermal zone device for motherboard temperature (NULL if no DT binding)
+ * @input: Power button input device (NULL unless @button_mode is input)
  * @ctl_device: Misc device for userspace control
  * @ctl_mutex: Mutex protecting control device output buffer
  * @ctl_read_mutex: Mutex protecting control device input buffer
@@ -280,6 +298,10 @@ struct pcat_pm_fw_caps {
  * @fan_set_ok: Fan set acknowledged by PMU
  * @baudrate: Serial port baud rate (default 115200)
  * @force_poweroff_timeout: Forced power off timeout in seconds
+ * @button_mode: Response to a PMU power button press
+ * @watchdog_rearm_pending: Keep re-sending the watchdog config to defer the
+ *	PMU's post-request force shutdown (input/ignore modes)
+ * @watchdog_rearm_timestamp: Last watchdog re-send time (ns)
  * @write_framenum: Incrementing frame number for sent packets
  * @read_buffer: UART receive buffer
  * @read_buffer_used: Bytes used in receive buffer
@@ -349,6 +371,7 @@ struct pcat_pm_data {
 	struct device *hwmon_speed_fan_dev;
 	struct thermal_zone_device *tzdev;
 	struct thermal_cooling_device *cdev;
+	struct input_dev *input;
 
 	/* Worker thread and timer */
 	struct kthread_worker *kworker;
@@ -369,6 +392,9 @@ struct pcat_pm_data {
 	u32 pm_version;
 	u32 baudrate;
 	u32 force_poweroff_timeout;
+	enum pcat_pm_button_mode button_mode;
+	bool watchdog_rearm_pending;
+	u64 watchdog_rearm_timestamp;
 	bool work_flag;
 	bool poweroff_ok;
 	bool fan_set_ok;
@@ -709,6 +735,31 @@ int pcat_pm_hwmon_probe(struct pcat_pm_data *pm_data);
  * Return: 0 on success, negative error otherwise
  */
 int pcat_pm_fan_probe(struct pcat_pm_data *pm_data);
+
+/* ========================================================================
+ * Power Button Module (pcat-pm-input.c)
+ * ======================================================================== */
+
+/**
+ * pcat_pm_input_probe - Read the button mode and register the input device
+ * @pm_data: Driver data
+ *
+ * Picks the mode from the button_mode module parameter, else the optional
+ * pmu-button-mode device tree property, else poweroff. Registers a
+ * KEY_POWER input device in input mode only.
+ *
+ * Return: 0 on success, negative error otherwise
+ */
+int pcat_pm_input_probe(struct pcat_pm_data *pm_data);
+
+/**
+ * pcat_pm_button_event - Handle a PMU power button press
+ * @pm_data: Driver data
+ *
+ * Powers off, reports KEY_POWER, or does nothing, per @button_mode.
+ * Called from the UART receive context, so it must not sleep.
+ */
+void pcat_pm_button_event(struct pcat_pm_data *pm_data);
 
 /* ========================================================================
  * Control Device Module (pcat-pm-ctl.c)

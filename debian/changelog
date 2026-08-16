@@ -1,3 +1,24 @@
+photonicat-pm (1.0.6-1) unstable; urgency=medium
+
+  * Make the response to a PMU power button press configurable. The new
+    pmu-button-mode device tree property selects poweroff (the previous
+    hardcoded behavior, still the default), input (report KEY_POWER on an
+    input device and let userspace decide, so HandlePowerKey= in
+    logind.conf applies to this button), or ignore.
+  * Add a button_mode module parameter that overrides the device tree
+    property, so a mode can be tried without a device tree overlay and a
+    reboot.
+  * Document that the PMU never announces a button release, so userspace
+    sees every press as a short press.
+  * After a press in input or ignore mode, suppress the protocol ACK and
+    re-send the watchdog configuration every 30 seconds to try to defer
+    the PMU's force shutdown.
+  * Record RA2E1260702000 button behavior: presses shorter than about
+    three seconds send nothing, and the PMU cuts power about 60 seconds
+    after announcing a press regardless of the host's response.
+
+ -- HackingGate <i@hackinggate.com>  Sun, 16 Aug 2026 19:30:00 +0900
+
 photonicat-pm (1.0.5-1) unstable; urgency=medium
 
   * Expose the PMU charge stop threshold as the standard battery power

@@ -153,6 +153,72 @@ arrived yet; wait about a second before reading back a confirmed state. A
 readback that reverts means the PMU refused the write — older firmware ignores
 the set command outright, which the wiki records.
 
+### Power Button
+
+The PMU reports a power button press with a `PMU_REQUEST_SHUTDOWN` frame. The
+`pmu-button-mode` device tree property decides what the driver does with it:
+
+| Mode | Behavior |
+|------|----------|
+| `poweroff` (default) | The driver calls `orderly_poweroff()`, the same as every release before this property existed. |
+| `input` | The driver reports `KEY_POWER` on an input device named `photonicat-pm power button` and takes no other action. Userspace owns the policy, so `HandlePowerKey=` in `logind.conf(5)` applies to this button. |
+| `ignore` | The driver logs the press and does nothing. |
+
+The button on this board is wired to the PMU, not to the SoC. The `rk805
+pwrkey` input device that a Photonicat 2 also exposes belongs to the PMIC and
+is a different button, so `HandlePowerKey=` has no effect on the PMU button
+unless `pmu-button-mode = "input"` is set.
+
+The PMU sends one frame per press and never announces a release, so the driver
+reports a press immediately followed by a release. Userspace sees every press
+as a short press; `HandlePowerKeyLongPress=` cannot trigger from this button.
+
+The mode can also be set with the `button_mode` module parameter, which
+overrides the device tree property. This avoids a device tree overlay and a
+reboot when trying a mode out:
+
+```bash
+# One boot only
+rmmod photonicat_pm && insmod photonicat-pm.ko button_mode=input
+
+# Persistently
+echo 'options photonicat-pm button_mode=input' > /etc/modprobe.d/photonicat-pm.conf
+```
+
+The driver logs the mode it settled on and where it came from at probe:
+`PMU button mode: input (module parameter)`.
+
+On a desktop, the desktop environment usually takes over the power key from
+`systemd-logind` and applies its own policy — GNOME defaults to suspend, not
+power off. Whether the PMU button can wake this board from suspend has not
+been verified, so set the desktop's power button action deliberately before
+relying on `input` mode there.
+
+```bash
+# Confirm the input device is present (input mode only)
+grep -A4 'photonicat-pm power button' /proc/bus/input/devices
+
+# Watch presses without acting on them (by-path name comes from the UART
+# address, so it is board-specific; this is the Photonicat 2 one)
+sudo evtest /dev/input/by-path/platform-2afc0000.serial-event
+```
+
+The firmware debounces the button itself: on RA2E1260702000 a quick tap or a
+hold under about two seconds sends nothing at all, and a hold of about three
+seconds sends the request. A stray press in a bag therefore never reaches the
+host in the first place.
+
+> [!CAUTION]
+> On RA2E1260702000 the host cannot decline. About 60 seconds after
+> announcing the request the PMU cuts power regardless of what the host
+> does — tested with the protocol ACK suppressed, logind ignoring the key,
+> and heartbeats still flowing. `input` and `ignore` therefore turn a clean
+> shutdown into an unclean one on this firmware. The driver re-sends the
+> watchdog configuration every 30 seconds after a press to try to defer the
+> cut, but this has not been confirmed to help. Treat `poweroff` as the only
+> mode that ends in a clean shutdown until a firmware behaves differently;
+> the wiki records per-firmware results.
+
 ### PMU Information
 
 | Interface | Description |
@@ -227,6 +293,9 @@ configuration for Photonicat 2.
 
         /* Config: force power off if shutdown hangs (seconds, 0 = disabled) */
         force-poweroff-timeout = <60>;
+
+        /* Config: what a PMU power button press does */
+        pmu-button-mode = "input";
 
         /* Optional: exposes board temperature to the kernel thermal framework */
         #thermal-sensor-cells = <0>;
@@ -303,6 +372,7 @@ battery: battery {
 | `baudrate` | `<u32>` | 115200 | Hardware | UART baud rate. Must match the PMU firmware's configured speed. |
 | `pm-version` | `<u32>` | 1 | Hardware | PMU protocol version (1 or 2). Determined by the PMU firmware on the board. Version 2 adds battery current and PMU-reported capacity. |
 | `force-poweroff-timeout` | `<u32>` | 0 (disabled) | Config | Forced power-off timeout in seconds (0–255). Sent to the PMU via `WATCHDOG_TIMEOUT_SET` command at driver probe. When non-zero, the PMU will force power off after this many seconds following a software shutdown. Practical range is 0–60; values >60 are ineffective because the driver also sends a hardcoded 60s watchdog timeout that triggers first. When set to 0, only the 60s watchdog guards against hangs. Safety net for stuck shutdowns. |
+| `pmu-button-mode` | string | `"poweroff"` | Config | What the driver does when the PMU reports a power button press: `"poweroff"` calls `orderly_poweroff()` from the driver, `"input"` reports `KEY_POWER` on an input device and leaves the decision to userspace, `"ignore"` logs the press and does nothing. An unrecognized value falls back to `"poweroff"` with a warning. Overridden by the `button_mode` module parameter when that is set. See [Power Button](#power-button). |
 | `#thermal-sensor-cells` | `<0>` | (not set) | Config | Exposes the motherboard temperature to the kernel thermal framework. Must be `<0>` (no per-sensor arguments). Required when a `thermal-zones` binding in the board DTS references this node via `thermal-sensors`. Without this, the driver still registers an hwmon sensor but no thermal zone. |
 
 ## Usage Examples

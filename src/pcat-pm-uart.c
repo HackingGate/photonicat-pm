@@ -476,8 +476,12 @@ void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
 		break;
 
 	case PCAT_PM_COMMAND_PMU_REQUEST_SHUTDOWN:
-		dev_info(&pm_data->serdev->dev, "PMU request shutdown.");
-		orderly_poweroff(true);
+		pcat_pm_button_event(pm_data);
+		/* The ACK may read as "host agreed, cut power", so send it
+		 * only in poweroff mode, where the host is going down anyway.
+		 */
+		if (pm_data->button_mode != PCAT_PM_BUTTON_MODE_POWEROFF)
+			need_ack = false;
 		break;
 
 	case PCAT_PM_COMMAND_STATUS_REPORT:

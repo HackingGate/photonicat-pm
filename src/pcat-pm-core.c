@@ -11,6 +11,9 @@
 
 #include "photonicat-pm.h"
 
+static void pcat_pm_watchdog_timeout_set(struct pcat_pm_data *pm_data,
+	u8 interval, long timeout);
+
 /**
  * pcat_pm_check_work - Periodic worker function
  * @work: kthread_work structure
@@ -30,6 +33,24 @@ static void pcat_pm_check_work(struct kthread_work *work)
 			NULL, 0, false, 0);
 
 	now = ktime_get_boottime_ns();
+
+	/* The PMU force-cuts power about a minute after it announces a
+	 * power button press. In input/ignore modes the host may decline,
+	 * so keep re-sending the watchdog config to defer the cut.
+	 */
+	if (pm_data->work_flag &&
+		READ_ONCE(pm_data->watchdog_rearm_pending) &&
+		now >= pm_data->watchdog_rearm_timestamp + 30 * NSEC_PER_SEC) {
+		if (!pm_data->watchdog_rearm_timestamp)
+			dev_info(&pm_data->serdev->dev,
+				"Re-arming PMU watchdog to defer force shutdown.\n");
+		else
+			dev_dbg(&pm_data->serdev->dev,
+				"Re-arming PMU watchdog.\n");
+		pcat_pm_watchdog_timeout_set(pm_data,
+			PCAT_PM_WATCHDOG_DEFAULT_INTERVAL, 0);
+		pm_data->watchdog_rearm_timestamp = now;
+	}
 
 	mutex_lock(&pm_data->mutex);
 	if (now >= pm_data->status_report_timestamp + 15 * NSEC_PER_SEC &&
@@ -211,6 +232,10 @@ static int pcat_pm_probe(struct serdev_device *serdev)
 	if (device_property_read_u32(dev, "force-poweroff-timeout",
 				    &pm_data->force_poweroff_timeout))
 		pm_data->force_poweroff_timeout = 0;
+
+	ret = pcat_pm_input_probe(pm_data);
+	if (ret)
+		dev_err(dev, "Failed to register power button input: %d\n", ret);
 
 	serdev_device_set_drvdata(serdev, pm_data);
 	serdev_device_set_client_ops(serdev, &pcat_pm_serdev_ops);
