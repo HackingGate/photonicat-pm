@@ -11,9 +11,9 @@ Per-firmware observed behavior is recorded in the
 
 | Term | Meaning |
 |------|---------|
-| PMU | The power management unit: the microcontroller this driver talks to over UART, firmware included. Used throughout these docs, in every `pmu_*` attribute, and in the vendor's own source, which never says MCU. |
-| MCU | The same chip, named after the part rather than its role. Used by the vendor's product changelog, not by their code. |
-| PMU firmware | The image running on that chip. The vendor's `pcat-pmu-updater` calls it PMU firmware too; their changelog calls it MCU firmware. |
+| PMU | The power management unit: the microcontroller this driver talks to over UART, firmware included. Used throughout these docs, in every `pmu_*` attribute, and by the vendor at the protocol layer — `pcat-pmu-updater` and the `pmu-status` / `pmu-fw-version-get` socket commands. |
+| MCU | The same chip, named after the part rather than its role. The vendor uses it above the socket: the web UI's "Update MCU" button, the `/api/v1/mcu_update.json` endpoint, the `pcat2_mcu/` firmware download path, and the product changelog. |
+| PMU firmware | The image running on that chip. `pcat-pmu-updater` calls it PMU firmware; the vendor's web UI and changelog call the same image MCU firmware. |
 | `photonicat-pm` | This driver: the host side of the UART link, and the name of its sysfs directory and device tree node. |
 
 ## Features
