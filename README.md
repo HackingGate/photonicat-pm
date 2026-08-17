@@ -7,6 +7,15 @@ Linux kernel driver for the Photonicat 2 power management unit (PMU).
 Per-firmware observed behavior is recorded in the
 [wiki](https://github.com/HackingGate/photonicat-pm/wiki/PMU-Firmware-Observed-Behavior).
 
+## Terminology
+
+| Term | Meaning |
+|------|---------|
+| PMU | The power management unit: the microcontroller this driver talks to over UART. Used throughout these docs and in every `pmu_*` attribute. |
+| MCU | The same chip, named after the part rather than its role. The vendor changelog and the wiki flashing pages use it; the vendor's own `pmu-manager.c` and `pcat-pmu-updater` do not. |
+| PMU firmware | The image running on that chip. "MCU firmware" in vendor material means the same thing. |
+| `photonicat-pm` | This driver: the host side of the UART link, and the name of its sysfs directory and device tree node. |
+
 ## Features
 
 ### Power Supply
