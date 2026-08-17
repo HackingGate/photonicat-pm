@@ -4,90 +4,8 @@
 
 Linux kernel driver for the Photonicat 2 power management unit (PMU).
 
-The PMU is a separate microcontroller (MCU) on the board. Its image is called
-"MCU firmware" in the wiki and vendor tooling; this README says "PMU firmware"
-throughout, matching the `pmu_fw_version` attribute. See the
-[Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki) for
-firmware inspection and flashing workflows.
-
-## Scope
-
-This driver is the host side of the UART link only. It does not build, sign,
-package, or distribute PMU firmware, and it cannot change how the PMU behaves
-once a command reaches it.
-
-The firmware is closed source and published only as a wrapped binary image. The
-UART protocol it speaks is not: the vendor's open-source userspace manager,
-[`photonicat/rockchip_rk3568_pcat_manager`](https://github.com/photonicat/rockchip_rk3568_pcat_manager),
-carries the command numbers and payload layouts in `src/pmu-manager.c`. That
-source, together with observation of the wire, is where this driver's protocol
-definitions come from.
-
-No specification of behavior exists: no document states which commands a given
-firmware version honors, what it does when it declines one, or which fields are
-trustworthy. Everything here is established by testing real hardware;
-behavior can change between firmware versions without notice.
-Which firmware versions were tested is recorded under
-[MCU Firmware Observed Behavior](https://github.com/HackingGate/photonicat-pm/wiki/MCU-Firmware-Observed-Behavior)
-in the wiki.
-
-Firmware defects are outside what this driver can fix — a PMU that ignores a
-command, reports a broken clock, or rolls back an update behaves that way before
-the driver sees the response. Report those to the vendor. Issues in this
-repository are for the driver: parsing, sysfs and ABI behavior, kernel
-integration, and packaging.
-
-## PMU Firmware Capability Policy
-
-The driver treats firmware behavior as runtime-observed capability or quirk
-detection, not as a static firmware-version allowlist or denylist.
-
-- **RTC and scheduled boot**: start as `pending-probe`. `/dev/rtc0` remains
-  registered for ABI stability, but RTC reads, set-time, alarms, and raw
-  scheduled-boot commands are blocked until the PMU reports three consecutive
-  valid, advancing RTC samples. Passing that probe promotes
-  `pmu_rtc_capability` to `enabled-probe`.
-- **Battery capacity**: follows the vendor driver policy. PMU protocol v2
-  status reports use the PMU-reported SOC byte directly. Shorter status reports
-  fall back to voltage-derived OCV SOC from the device-tree battery profile.
-- **Energy and fan**: PMU protocol v2 energy fields and fan auto-speed reset are
-  not trusted by current driver releases. `energy_full` remains the static
-  device-tree design capacity, `energy_now` is not exported, and fan auto-speed
-  restoration requires the documented workarounds.
-- **Charge stop threshold**: starts as `pending-probe`. The driver queries the
-  PMU on load; a reply in the 50–100 range caches the value and promotes
-  `pmu_charge_threshold_capability` to `enabled-probe`.
-  `charge_control_end_threshold` reads `ENODATA` while the capability is
-  pending. Writes are not gated on the probe: firmware without support does
-  not answer, so the write fails with `ETIMEDOUT`, and a firmware that answers
-  promotes the capability.
-- **Power-on mode**: starts as `pending-probe`. The driver queries the PMU on
-  load, and any answer promotes `pmu_power_on_mode_capability` to
-  `enabled-probe`. `power_on_mode` reads `ENODATA` while the capability is
-  pending.
-- **Status LED and beeper**: the driver reports the state from the PMU's last
-  `STATUS_LED_BEEPER_V2_SET_ACK`, so a refused write is visible as a readback
-  that reverts. Some firmware ignores the set command entirely and reports a
-  constant state, which leaves both attributes uncontrollable.
-
-A capability that stays `pending-probe` means the running firmware did not
-answer the driver's probe for it. Which versions were tested against which
-feature is recorded in
-[MCU Firmware Observed Behavior](https://github.com/HackingGate/photonicat-pm/wiki/MCU-Firmware-Observed-Behavior),
-along with the wiki's flashing instructions. Two limitations are not
-version-specific:
-
-- **Fan auto-speed reset**: no firmware exposes a trusted API for it, so
-  restoring PMU auto speed needs the workarounds under
-  [Fan Control](#fan-control).
-- **`VOLTAGE_THRESHOLD_SET` (`0x17`)**, the LED, startup, charger limit,
-  auto-shutdown and battery-full voltages the vendor manager configures: the
-  PMU refuses every payload tested and offers no command to read the thresholds
-  back, so the driver never sends it and exposes no attributes for it. The
-  command number stays in `photonicat-pm.h` for raw `/dev/pcat-pm-ctl` users.
-
-`pmu_hw_version` is a firmware-reported string, not a stable board revision —
-the same board reports different values under different firmware.
+Per-firmware observed behavior is recorded in the
+[wiki](https://github.com/HackingGate/photonicat-pm/wiki/PMU-Firmware-Observed-Behavior).
 
 ## Features
 
@@ -104,8 +22,8 @@ The charge stop threshold is enforced by the PMU, not by the driver: writing
 result of the PMU's ACK. Values outside 50–100 are rejected with `EINVAL`
 before any command is sent, a PMU refusal returns `EIO`, and firmware without
 charge threshold support returns `ETIMEDOUT`. Reads return `ENODATA` until the
-PMU has answered a threshold query at least once; see
-[PMU Firmware Capability Policy](#pmu-firmware-capability-policy).
+PMU has answered a threshold query at least once, which promotes
+`pmu_charge_threshold_capability` to `enabled-probe`.
 
 > [!CAUTION]
 > PMU protocol v2 status-report energy values are not validated as live or
@@ -239,7 +157,7 @@ no hard-cutoff hold to escalate to.
 
 | Interface | Description |
 |-----------|-------------|
-| `/sys/kernel/photonicat-pm/pmu_hw_version` | PMU hardware version string (read-only). Queried from PMU on driver load. |
+| `/sys/kernel/photonicat-pm/pmu_hw_version` | PMU hardware version string (read-only). Queried from PMU on driver load. Firmware-reported, not a stable board revision: the same board reports different values under different firmware. |
 | `/sys/kernel/photonicat-pm/pmu_fw_version` | PMU firmware version string (read-only). Queried from PMU on driver load. |
 | `/sys/kernel/photonicat-pm/pmu_rtc_capability` | PMU RTC policy state (read-only). Values: `pending-probe` or `enabled-probe`. |
 | `/sys/kernel/photonicat-pm/pmu_charge_threshold_capability` | PMU charge threshold policy state (read-only). Values: `pending-probe` or `enabled-probe`. |
@@ -639,6 +557,15 @@ The driver communicates with the PMU over UART using a framed binary protocol:
 - **0x5A**: Tail marker
 
 See `photonicat-pm.h` for command definitions.
+
+The PMU firmware is closed source and no protocol specification exists. Command
+numbers and payload layouts come from the vendor's userspace manager,
+[`photonicat/rockchip_rk3568_pcat_manager`](https://github.com/photonicat/rockchip_rk3568_pcat_manager)
+(`src/pmu-manager.c`), and from observing the wire. The vendor's
+[firmware changelog](https://photonicat.com/wiki/Photonicat_2_固件_Changelog)
+records user-facing changes, including MCU sections in later releases, but not
+command semantics, so protocol behavior is established by testing and can differ
+between firmware versions.
 
 ## Debug Logging
 
