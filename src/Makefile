@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Makefile for Photonicat PM driver DKMS module
 
 obj-m += photonicat-pm.o
@@ -8,6 +8,7 @@ photonicat-pm-y := pcat-pm-core.o \
                    pcat-pm-rtc.o \
                    pcat-pm-hwmon.o \
                    pcat-pm-fan.o \
+                   pcat-pm-input.o \
                    pcat-pm-ctl.o \
                    pcat-pm-sysfs.o
 

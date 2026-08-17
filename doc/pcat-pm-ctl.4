@@ -1,4 +1,4 @@
-.\" SPDX-License-Identifier: GPL-3.0-or-later
+.\" SPDX-License-Identifier: GPL-2.0-or-later
 .\" Man page for photonicat-pm kernel driver
 .TH PCAT-PM-CTL 4 "August 2026" "Linux" "Linux Programmer's Manual"
 .SH NAME
@@ -81,14 +81,14 @@ while the capability is pending. Writes are not gated on the probe: firmware
 without support does not answer, so the write fails with
 .BR ETIMEDOUT .
 .PP
-Current firmware honors every gated feature, so a capability that stays
+A capability that stays
 .B pending-probe
-means the running firmware is older than the driver expects. Per-firmware
-results are recorded in the project wiki:
+means the running firmware did not answer the driver's probe for it.
+Per-firmware results are recorded in the project wiki:
 .PP
 .RS
 .nf
-https://github.com/HackingGate/photonicat-pm/wiki/MCU\-Firmware\-Observed\-Behavior
+https://github.com/HackingGate/photonicat-pm/wiki/PMU\-Firmware\-Observed\-Behavior
 .fi
 .RE
 .SS Power Supply
@@ -203,6 +203,63 @@ Network status LED repeat count (read-write, 0\-65535). 0 = infinite.
 .B /sys/kernel/photonicat-pm/movement_trigger
 Accelerometer-based motion detection (read-only). Returns 1 if motion
 detected, 0 otherwise.
+.SS Power Button
+The PMU announces a power button press with a PMU_REQUEST_SHUTDOWN frame.
+The
+.B pmu-button-mode
+device tree property decides what the driver does with it: power the system
+off itself, report
+.B KEY_POWER
+on an input device named \(dqphotonicat-pm power button\(dq, or ignore the
+press. See DEVICE TREE below.
+.PP
+The button is wired to the PMU, not to the SoC. The
+.B rk805 pwrkey
+input device that a Photonicat 2 also exposes belongs to the PMIC and is a
+different button, so
+.B HandlePowerKey=
+in
+.BR logind.conf (5)
+has no effect on the PMU button unless
+.B pmu-button-mode
+is set to \(dqinput\(dq.
+.PP
+The PMU sends one frame per press and never announces a release, so the
+driver reports a press immediately followed by a release. Userspace sees
+every press as a short press;
+.B HandlePowerKeyLongPress=
+cannot trigger from this button.
+.PP
+The firmware debounces the button itself: on RA2E1260702000 a quick tap or
+a hold under about two seconds sends nothing, and a hold of about three
+seconds sends the request. Holding past that sends nothing further: a 12
+second hold reported one
+.B KEY_POWER
+and left the board running, so the firmware has no hard-cutoff hold to
+escalate to.
+.PP
+The PMU applies
+.B force-poweroff-timeout
+to a shutdown it announces itself, not only to one the host announces.
+Once it has sent PMU_REQUEST_SHUTDOWN it stops reporting status and cuts
+power that many seconds later whatever the host does; on RA2E1260702000
+that was 62 seconds with the property set to 60 and 125 seconds with it set
+to 120.
+.PP
+So that a press the host declines does not become a power cut, the driver
+sends 0 for that timeout while the system is running in \(dqinput\(dq or
+\(dqignore\(dq mode, and restores the configured value in the shutdown
+handler and across suspend. A suspended host cannot service the button, so
+a press while suspended cuts power after the timeout in every mode \(em
+with button wake unverified, that is also the only way to recover a suspend
+that never wakes.
+A press then leaves the PMU running normally, and a shutdown that
+hangs is still cut short. A kernel hang is caught by the 60 s heartbeat
+watchdog in every mode. A hung userspace is not: in \(dqinput\(dq mode the
+button then only queues an event nobody reads, and the firmware has no
+hard-cutoff hold, so recovery is SysRq, the serial console, or
+disconnecting power; \(dqpoweroff\(dq mode forces the shutdown from the
+kernel instead.
 .SS PMU Information
 .TP
 .B /sys/kernel/photonicat-pm/pmu_hw_version
@@ -300,12 +357,44 @@ Default: 115200.
 .TP
 .B force-poweroff-timeout
 Forced power off timeout in seconds (0\-255). Sent to the PMU via
-WATCHDOG_TIMEOUT_SET command at driver probe. When non-zero, the PMU will
-force power off after this many seconds following a software shutdown.
-Practical range is 0\-60; values >60 are ineffective because the driver
-also sends a hardcoded 60 s watchdog timeout that triggers first.
-When set to 0, only the 60 s watchdog guards against hangs.
+WATCHDOG_TIMEOUT_SET command at driver probe. When non-zero, the PMU cuts
+power this many seconds after a shutdown is announced \(em by the host, and
+also by the PMU itself when the power button is pressed.
+The 60 s heartbeat watchdog does not cap it: that one fires only when
+heartbeats stop, and 120 here measured a 125 s cut.
+Outside
+.B pmu-button-mode
+\(dqpoweroff\(dq the driver sends 0 while the system is running and the
+configured value at shutdown and during suspend, so a declined button press
+is not a power cut. When set to 0, only the heartbeat watchdog guards
+against hangs.
 Default: 0 (disabled).
+.TP
+.B pmu-button-mode
+What the driver does when the PMU reports a power button press.
+.RS
+.TP
+.B "\(dqpoweroff\(dq"
+Call
+.BR orderly_poweroff (9)
+from the driver. This is what every release before this property existed
+did, and stays the default so out-of-tree device trees keep their behavior.
+.TP
+.B "\(dqinput\(dq"
+Report
+.B KEY_POWER
+press and release on an input device and take no other action. Userspace
+owns the policy, including whether to power off at all.
+.TP
+.B "\(dqignore\(dq"
+Log the press and do nothing.
+.RE
+.IP
+An unrecognized value falls back to \(dqpoweroff\(dq with a warning.
+Overridden by the
+.B button_mode
+module parameter when that is set (see MODULE PARAMETERS).
+Default: \(dqpoweroff\(dq.
 .TP
 .B pm-version
 PMU protocol version (1 or 2). Determined by the PMU firmware on the
@@ -322,6 +411,18 @@ binding in the board DTS can reference this node via
 .BR thermal-sensors .
 Without this property the driver still registers an hwmon sensor but no
 thermal zone.
+.SH MODULE PARAMETERS
+.TP
+.B button_mode
+Power button mode: \(dqpoweroff\(dq, \(dqinput\(dq, or \(dqignore\(dq
+(see the
+.B pmu-button-mode
+device tree property above for what each mode does). When set, it overrides
+the device tree property, which avoids a device tree overlay and a reboot
+when trying a mode out. An unrecognized value is ignored with a warning and
+the device tree property (or the default) applies. The driver logs the mode
+it settled on and where it came from at probe.
+Default: unset.
 .SH HWMON SENSORS
 The driver registers hardware monitoring devices accessible via
 .BR sensors (1):
@@ -379,6 +480,12 @@ Raw PMU command interface
 .TP
 .I /sys/kernel/photonicat-pm/
 Sysfs attributes
+.TP
+.I /dev/input/by-path/platform-*.serial-event
+Power button input device, present only in \(dqinput\(dq mode. The by-path
+name comes from the UART address, so it is board-specific;
+.I platform-2afc0000.serial-event
+on the Photonicat 2.
 .SH DEBUGGING
 PMU command logging uses the kernel
 .BR dev_dbg (9)
@@ -420,7 +527,8 @@ ccflags\-y += \-DDEBUG
 .BR rtc (4),
 .BR rtcwake (8),
 .BR power_supply (4),
-.BR thermal (4)
+.BR thermal (4),
+.BR logind.conf (5)
 .SH AUTHORS
 Kyosuke Nekoyashiki <supercatexpert@gmail.com>
 .br

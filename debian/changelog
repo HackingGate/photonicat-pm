@@ -1,3 +1,50 @@
+photonicat-pm (1.1.0-1) unstable; urgency=medium
+
+  * Make the response to a PMU power button press configurable. The new
+    pmu-button-mode device tree property selects poweroff (the previous
+    hardcoded behavior, still the default), input (report KEY_POWER on an
+    input device and let userspace decide, so HandlePowerKey= in
+    logind.conf applies to this button), or ignore.
+  * Add a button_mode module parameter that overrides the device tree
+    property, so a mode can be tried without a device tree overlay and a
+    reboot.
+  * Document that the PMU never announces a button release, so userspace
+    sees every press as a short press.
+  * Stop the PMU from force-cutting power after a button press the host
+    is allowed to decline. The PMU applies force-poweroff-timeout to the
+    shutdown it announces itself, not only to one the host announces, so
+    outside poweroff mode the driver now sends 0 for that timeout while
+    the system is running and restores the configured value in the
+    shutdown handler. Without this a press cut power after the configured
+    timeout even with the host declining; measured at 62 seconds with the
+    property set to 60 and 125 seconds with it set to 120.
+  * Suppress the protocol ACK for a press in input or ignore mode.
+  * Correct the force-poweroff-timeout documentation: values above 60 are
+    not capped by the 60 second heartbeat watchdog, which fires only when
+    heartbeats stop.
+  * Record RA2E1260702000 button behavior: presses shorter than about
+    three seconds send nothing at all, a hold of about three seconds sends
+    the request, and a longer hold sends nothing further - a 12 second
+    hold sent one frame and did not cut power, so the firmware has no
+    hard-cutoff hold.
+  * Fall back to poweroff mode when the power button input device fails to
+    register. The driver used to stay in input mode with no input device,
+    so a later press fell through to a kernel poweroff with the force
+    power off timeout disarmed - the opposite of the configured policy.
+  * Keep the force power off timeout armed across suspend in every mode. A
+    suspended host cannot service the button, so a press while suspended
+    now cuts power after the timeout, which with button wake unverified is
+    also the only way to recover a suspend that never wakes.
+  * Disarm the heartbeat watchdog on module removal. It stayed armed after
+    rmmod and cut power to the still-running system about a minute later,
+    which the README's rmmod/insmod recipe walked straight into.
+  * Return the license to GPL-2.0-or-later, matching the original driver
+    and the MODULE_LICENSE declaration. The GPL-3.0-or-later relabel was
+    incompatible with the GPL-2.0-only kernel and would have blocked any
+    kernel-adjacent distribution.
+
+ -- HackingGate <i@hackinggate.com>  Mon, 17 Aug 2026 22:10:00 +0900
+
 photonicat-pm (1.0.5-1) unstable; urgency=medium
 
   * Expose the PMU charge stop threshold as the standard battery power

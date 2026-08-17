@@ -4,90 +4,17 @@
 
 Linux kernel driver for the Photonicat 2 power management unit (PMU).
 
-The PMU is a separate microcontroller (MCU) on the board. Its image is called
-"MCU firmware" in the wiki and vendor tooling; this README says "PMU firmware"
-throughout, matching the `pmu_fw_version` attribute. See the
-[Photonicat PM Wiki](https://github.com/HackingGate/photonicat-pm/wiki) for
-firmware inspection and flashing workflows.
+Per-firmware observed behavior is recorded in the
+[wiki](https://github.com/HackingGate/photonicat-pm/wiki/PMU-Firmware-Observed-Behavior).
 
-## Scope
+## Terminology
 
-This driver is the host side of the UART link only. It does not build, sign,
-package, or distribute PMU firmware, and it cannot change how the PMU behaves
-once a command reaches it.
-
-The firmware is closed source and published only as a wrapped binary image. The
-UART protocol it speaks is not: the vendor's open-source userspace manager,
-[`photonicat/rockchip_rk3568_pcat_manager`](https://github.com/photonicat/rockchip_rk3568_pcat_manager),
-carries the command numbers and payload layouts in `src/pmu-manager.c`. That
-source, together with observation of the wire, is where this driver's protocol
-definitions come from.
-
-No specification of behavior exists: no document states which commands a given
-firmware version honors, what it does when it declines one, or which fields are
-trustworthy. Everything here describes current firmware, established by testing
-real hardware; behavior can change between firmware versions without notice.
-Results for older firmware are recorded under
-[MCU Firmware Observed Behavior](https://github.com/HackingGate/photonicat-pm/wiki/MCU-Firmware-Observed-Behavior)
-in the wiki.
-
-Firmware defects are outside what this driver can fix — a PMU that ignores a
-command, reports a broken clock, or rolls back an update behaves that way before
-the driver sees the response. Report those to the vendor. Issues in this
-repository are for the driver: parsing, sysfs and ABI behavior, kernel
-integration, and packaging.
-
-## PMU Firmware Capability Policy
-
-The driver treats firmware behavior as runtime-observed capability or quirk
-detection, not as a static firmware-version allowlist or denylist.
-
-- **RTC and scheduled boot**: start as `pending-probe`. `/dev/rtc0` remains
-  registered for ABI stability, but RTC reads, set-time, alarms, and raw
-  scheduled-boot commands are blocked until the PMU reports three consecutive
-  valid, advancing RTC samples. Passing that probe promotes
-  `pmu_rtc_capability` to `enabled-probe`.
-- **Battery capacity**: follows the vendor driver policy. PMU protocol v2
-  status reports use the PMU-reported SOC byte directly. Shorter status reports
-  fall back to voltage-derived OCV SOC from the device-tree battery profile.
-- **Energy and fan**: PMU protocol v2 energy fields and fan auto-speed reset are
-  not trusted by current driver releases. `energy_full` remains the static
-  device-tree design capacity, `energy_now` is not exported, and fan auto-speed
-  restoration requires the documented workarounds.
-- **Charge stop threshold**: starts as `pending-probe`. The driver queries the
-  PMU on load; a reply in the 50–100 range caches the value and promotes
-  `pmu_charge_threshold_capability` to `enabled-probe`.
-  `charge_control_end_threshold` reads `ENODATA` while the capability is
-  pending. Writes are not gated on the probe: firmware without support does
-  not answer, so the write fails with `ETIMEDOUT`, and a firmware that answers
-  promotes the capability.
-- **Power-on mode**: starts as `pending-probe`. The driver queries the PMU on
-  load, and any answer promotes `pmu_power_on_mode_capability` to
-  `enabled-probe`. `power_on_mode` reads `ENODATA` while the capability is
-  pending.
-- **Status LED and beeper**: the driver reports the state from the PMU's last
-  `STATUS_LED_BEEPER_V2_SET_ACK`, so a refused write is visible as a readback
-  that reverts. Some firmware ignores the set command entirely and reports a
-  constant state, which leaves both attributes uncontrollable.
-
-Current firmware honors all four gated features, so a capability that stays
-`pending-probe` means the running firmware is older than the driver expects.
-Which version fails which feature is recorded in
-[MCU Firmware Observed Behavior](https://github.com/HackingGate/photonicat-pm/wiki/MCU-Firmware-Observed-Behavior),
-along with the wiki's flashing instructions. Two limitations survive on current
-firmware:
-
-- **Fan auto-speed reset**: no firmware exposes a trusted API for it, so
-  restoring PMU auto speed needs the workarounds under
-  [Fan Control](#fan-control).
-- **`VOLTAGE_THRESHOLD_SET` (`0x17`)**, the LED, startup, charger limit,
-  auto-shutdown and battery-full voltages the vendor manager configures: the
-  PMU refuses every payload tested and offers no command to read the thresholds
-  back, so the driver never sends it and exposes no attributes for it. The
-  command number stays in `photonicat-pm.h` for raw `/dev/pcat-pm-ctl` users.
-
-`pmu_hw_version` is a firmware-reported string, not a stable board revision —
-the same board reports different values under different firmware.
+| Term | Meaning |
+|------|---------|
+| PMU | The power management unit: the microcontroller this driver talks to over UART, firmware included. Used throughout these docs, in every `pmu_*` attribute, and by the vendor at the protocol layer — `pcat-pmu-updater` and the `pmu-status` / `pmu-fw-version-get` socket commands. |
+| MCU | The same chip, named after the part rather than its role. The vendor uses it above the socket: the web UI's "Update MCU" button, the `/api/v1/mcu_update.json` endpoint, the `pcat2_mcu/` firmware download path, and the product changelog. |
+| PMU firmware | The image running on that chip. `pcat-pmu-updater` calls it PMU firmware; the vendor's web UI and changelog call the same image MCU firmware. |
+| `photonicat-pm` | This driver: the host side of the UART link, and the name of its sysfs directory and device tree node. |
 
 ## Features
 
@@ -104,8 +31,8 @@ The charge stop threshold is enforced by the PMU, not by the driver: writing
 result of the PMU's ACK. Values outside 50–100 are rejected with `EINVAL`
 before any command is sent, a PMU refusal returns `EIO`, and firmware without
 charge threshold support returns `ETIMEDOUT`. Reads return `ENODATA` until the
-PMU has answered a threshold query at least once; see
-[PMU Firmware Capability Policy](#pmu-firmware-capability-policy).
+PMU has answered a threshold query at least once, which promotes
+`pmu_charge_threshold_capability` to `enabled-probe`.
 
 > [!CAUTION]
 > PMU protocol v2 status-report energy values are not validated as live or
@@ -153,11 +80,93 @@ arrived yet; wait about a second before reading back a confirmed state. A
 readback that reverts means the PMU refused the write — older firmware ignores
 the set command outright, which the wiki records.
 
+### Power Button
+
+The PMU reports a power button press with a `PMU_REQUEST_SHUTDOWN` frame. The
+`pmu-button-mode` device tree property decides what the driver does with it:
+
+| Mode | Behavior |
+|------|----------|
+| `poweroff` (default) | The driver calls `orderly_poweroff()`, the same as every release before this property existed. |
+| `input` | The driver reports `KEY_POWER` on an input device named `photonicat-pm power button` and takes no other action. Userspace owns the policy, so `HandlePowerKey=` in `logind.conf(5)` applies to this button. |
+| `ignore` | The driver logs the press and does nothing. |
+
+The button on this board is wired to the PMU, not to the SoC. The `rk805
+pwrkey` input device that a Photonicat 2 also exposes belongs to the PMIC and
+is a different button, so `HandlePowerKey=` has no effect on the PMU button
+unless `pmu-button-mode = "input"` is set.
+
+The PMU sends one frame per press and never announces a release, so the driver
+reports a press immediately followed by a release. Userspace sees every press
+as a short press; `HandlePowerKeyLongPress=` cannot trigger from this button.
+
+The mode can also be set with the `button_mode` module parameter, which
+overrides the device tree property. This avoids a device tree overlay and a
+reboot when trying a mode out:
+
+```bash
+# One boot only
+rmmod photonicat_pm && insmod photonicat-pm.ko button_mode=input
+
+# Persistently
+echo 'options photonicat-pm button_mode=input' > /etc/modprobe.d/photonicat-pm.conf
+```
+
+The driver logs the mode it settled on and where it came from at probe:
+`PMU button mode: input (module parameter)`.
+
+On a desktop, the desktop environment usually takes over the power key from
+`systemd-logind` and applies its own policy — GNOME defaults to suspend, not
+power off. Whether the PMU button can wake this board from suspend has not
+been verified, so set the desktop's power button action deliberately before
+relying on `input` mode there.
+
+```bash
+# Confirm the input device is present (input mode only)
+grep -A4 'photonicat-pm power button' /proc/bus/input/devices
+
+# Watch presses without acting on them (by-path name comes from the UART
+# address, so it is board-specific; this is the Photonicat 2 one)
+sudo evtest /dev/input/by-path/platform-2afc0000.serial-event
+```
+
+The firmware debounces the button itself: on RA2E1260702000 a quick tap or a
+hold under about two seconds sends nothing at all, and a hold of about three
+seconds sends the request. A stray press in a bag therefore never reaches the
+host in the first place. Holding past that sends nothing further: a 12 second
+hold reported one `KEY_POWER` and left the board running, so the firmware has
+no hard-cutoff hold to escalate to.
+
+> [!IMPORTANT]
+> The PMU applies [`force-poweroff-timeout`](#optional-properties) to a
+> shutdown it announces itself, not only to one the host announces. Once it
+> has sent `PMU_REQUEST_SHUTDOWN` it stops reporting status and cuts power
+> that many seconds later whatever the host does. On RA2E1260702000 that was
+> 62 s with the property set to 60 and 125 s with it set to 120.
+>
+> So that a press the host declines does not become a power cut, the driver
+> sends 0 for that timeout while the system is running in `input` or
+> `ignore` mode, and restores the configured value in the shutdown handler
+> and across suspend. A suspended host cannot service the button, so a press
+> while suspended cuts power after the timeout in every mode — with button
+> wake unverified, that is also the only way to recover a suspend that never
+> wakes.
+> A press then leaves the PMU running normally, and a shutdown that hangs is
+> still cut short. A kernel hang is caught by the 60 s heartbeat watchdog in
+> every mode. A hung userspace is not: in `input` mode the button then only
+> queues an event nobody reads, and the firmware has no hard-cutoff hold, so
+> recovery is SysRq, the serial console, or disconnecting power —
+> `poweroff` mode forces the shutdown from the kernel instead.
+>
+> Boards whose device tree leaves `force-poweroff-timeout` unset are
+> unaffected either way; the property defaults to 0. Armbian's Photonicat 2
+> device tree sets it to 60.
+
 ### PMU Information
 
 | Interface | Description |
 |-----------|-------------|
-| `/sys/kernel/photonicat-pm/pmu_hw_version` | PMU hardware version string (read-only). Queried from PMU on driver load. |
+| `/sys/kernel/photonicat-pm/pmu_hw_version` | PMU hardware version string (read-only). Queried from PMU on driver load. Firmware-reported, not a stable board revision: the same board reports different values under different firmware. |
 | `/sys/kernel/photonicat-pm/pmu_fw_version` | PMU firmware version string (read-only). Queried from PMU on driver load. |
 | `/sys/kernel/photonicat-pm/pmu_rtc_capability` | PMU RTC policy state (read-only). Values: `pending-probe` or `enabled-probe`. |
 | `/sys/kernel/photonicat-pm/pmu_charge_threshold_capability` | PMU charge threshold policy state (read-only). Values: `pending-probe` or `enabled-probe`. |
@@ -227,6 +236,9 @@ configuration for Photonicat 2.
 
         /* Config: force power off if shutdown hangs (seconds, 0 = disabled) */
         force-poweroff-timeout = <60>;
+
+        /* Config: what a PMU power button press does */
+        pmu-button-mode = "input";
 
         /* Optional: exposes board temperature to the kernel thermal framework */
         #thermal-sensor-cells = <0>;
@@ -302,7 +314,8 @@ battery: battery {
 | `power-gpio` | GPIO | (none) | Hardware | GPIO pin wired to PMU power-sense input. Pulled low at shutdown to signal the PMU. Get the pin from the board schematic; omit if no such wire exists. |
 | `baudrate` | `<u32>` | 115200 | Hardware | UART baud rate. Must match the PMU firmware's configured speed. |
 | `pm-version` | `<u32>` | 1 | Hardware | PMU protocol version (1 or 2). Determined by the PMU firmware on the board. Version 2 adds battery current and PMU-reported capacity. |
-| `force-poweroff-timeout` | `<u32>` | 0 (disabled) | Config | Forced power-off timeout in seconds (0–255). Sent to the PMU via `WATCHDOG_TIMEOUT_SET` command at driver probe. When non-zero, the PMU will force power off after this many seconds following a software shutdown. Practical range is 0–60; values >60 are ineffective because the driver also sends a hardcoded 60s watchdog timeout that triggers first. When set to 0, only the 60s watchdog guards against hangs. Safety net for stuck shutdowns. |
+| `force-poweroff-timeout` | `<u32>` | 0 (disabled) | Config | Forced power-off timeout in seconds (0–255). Sent to the PMU via `WATCHDOG_TIMEOUT_SET` command at driver probe. When non-zero, the PMU cuts power this many seconds after a shutdown is announced — by the host, and also by the PMU itself when the power button is pressed. The 60s heartbeat watchdog does not cap it: that one only fires when heartbeats stop, and 120 here measured a 125s cut. Outside `pmu-button-mode = "poweroff"` the driver sends 0 while the system is running and the configured value at shutdown and during suspend, so a declined button press is not a power cut; see [Power Button](#power-button). Safety net for stuck shutdowns. |
+| `pmu-button-mode` | string | `"poweroff"` | Config | What the driver does when the PMU reports a power button press: `"poweroff"` calls `orderly_poweroff()` from the driver, `"input"` reports `KEY_POWER` on an input device and leaves the decision to userspace, `"ignore"` logs the press and does nothing. An unrecognized value falls back to `"poweroff"` with a warning. Overridden by the `button_mode` module parameter when that is set. See [Power Button](#power-button). |
 | `#thermal-sensor-cells` | `<0>` | (not set) | Config | Exposes the motherboard temperature to the kernel thermal framework. Must be `<0>` (no per-sensor arguments). Required when a `thermal-zones` binding in the board DTS references this node via `thermal-sensors`. Without this, the driver still registers an hwmon sensor but no thermal zone. |
 
 ## Usage Examples
@@ -553,6 +566,15 @@ The driver communicates with the PMU over UART using a framed binary protocol:
 - **0x5A**: Tail marker
 
 See `photonicat-pm.h` for command definitions.
+
+The PMU firmware is closed source and no protocol specification exists. Command
+numbers and payload layouts come from the vendor's userspace manager,
+[`photonicat/rockchip_rk3568_pcat_manager`](https://github.com/photonicat/rockchip_rk3568_pcat_manager)
+(`src/pmu-manager.c`), and from observing the wire. The vendor's
+[firmware changelog](https://photonicat.com/wiki/Photonicat_2_固件_Changelog)
+records user-facing changes, including MCU sections in later releases, but not
+command semantics, so protocol behavior is established by testing and can differ
+between firmware versions.
 
 ## Debug Logging
 

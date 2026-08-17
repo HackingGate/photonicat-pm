@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Photonicat Power Manager Driver - Core Module
  *
@@ -71,6 +71,26 @@ static enum hrtimer_restart pcat_pm_check_timer_expired(struct hrtimer *timer)
 }
 
 /**
+ * pcat_pm_watchdog_timeout_send - Send watchdog configuration to the PMU
+ * @pm_data: Driver data
+ * @force_poweroff_timeout: Seconds after a shutdown is announced before the
+ *	PMU cuts power regardless of the host (0 to disable)
+ * @interval: Heartbeat interval in seconds (0 to disable)
+ * @timeout: UART write timeout in jiffies
+ *
+ * Most callers want pcat_pm_watchdog_timeout_set(), which picks
+ * @force_poweroff_timeout to match the power button mode.
+ */
+static void pcat_pm_watchdog_timeout_send(struct pcat_pm_data *pm_data,
+	u8 force_poweroff_timeout, u8 interval, long timeout)
+{
+	u8 timeouts[3] = {60, force_poweroff_timeout, interval};
+
+	pcat_pm_uart_write_data(pm_data, PCAT_PM_COMMAND_WATCHDOG_TIMEOUT_SET,
+		timeouts, 3, true, timeout);
+}
+
+/**
  * pcat_pm_watchdog_timeout_set - Configure PMU watchdog timeouts
  * @pm_data: Driver data
  * @interval: Heartbeat interval in seconds (0 to disable)
@@ -78,14 +98,29 @@ static enum hrtimer_restart pcat_pm_check_timer_expired(struct hrtimer *timer)
  *
  * Sends watchdog configuration to PMU. The PMU will power off the
  * system if heartbeats stop arriving within the configured timeout.
+ *
+ * The PMU applies force-poweroff-timeout to a shutdown it announces itself
+ * as well as to one the host announces: after sending PMU_REQUEST_SHUTDOWN
+ * it stops reporting status and cuts power that many seconds later, whatever
+ * the host does. That is wanted in poweroff mode, where the driver is going
+ * down anyway, but in input and ignore modes the host owns the decision, so
+ * the timeout is sent as 0 and the PMU arms nothing. pcat_pm_do_poweroff()
+ * restores the configured value before the host announces its own shutdown,
+ * which keeps the safety net for a shutdown that hangs, and
+ * pcat_pm_pm_suspend() arms it across suspend, when the host cannot answer a
+ * press. A host that hangs without announcing anything is still caught by
+ * the heartbeat watchdog.
  */
 static void pcat_pm_watchdog_timeout_set(struct pcat_pm_data *pm_data,
 	u8 interval, long timeout)
 {
-	u8 timeouts[3] = {60, pm_data->force_poweroff_timeout, interval};
+	u8 force_poweroff_timeout = pm_data->force_poweroff_timeout;
 
-	pcat_pm_uart_write_data(pm_data, PCAT_PM_COMMAND_WATCHDOG_TIMEOUT_SET,
-		timeouts, 3, true, timeout);
+	if (pm_data->button_mode != PCAT_PM_BUTTON_MODE_POWEROFF)
+		force_poweroff_timeout = 0;
+
+	pcat_pm_watchdog_timeout_send(pm_data, force_poweroff_timeout, interval,
+		timeout);
 }
 
 /**
@@ -119,6 +154,15 @@ static int pcat_pm_do_poweroff(struct sys_off_data *data)
 
 	pm_data->work_flag = false;
 	pcat_pm_worker_stop(pm_data);
+
+	/* Outside poweroff mode the force power off timeout is kept disarmed
+	 * while the host runs, so arm it for the shutdown about to start.
+	 */
+	if (pm_data->button_mode != PCAT_PM_BUTTON_MODE_POWEROFF)
+		pcat_pm_watchdog_timeout_send(pm_data,
+			pm_data->force_poweroff_timeout,
+			PCAT_PM_WATCHDOG_DEFAULT_INTERVAL,
+			msecs_to_jiffies(1000));
 
 	pcat_pm_uart_write_data(pm_data, PCAT_PM_COMMAND_HOST_REQUEST_SHUTDOWN,
 		NULL, 0, true, msecs_to_jiffies(1000));
@@ -211,6 +255,19 @@ static int pcat_pm_probe(struct serdev_device *serdev)
 	if (device_property_read_u32(dev, "force-poweroff-timeout",
 				    &pm_data->force_poweroff_timeout))
 		pm_data->force_poweroff_timeout = 0;
+
+	/* Losing the input device is not worth losing battery, RTC, and the
+	 * rest of the driver, but staying in input mode without one would
+	 * turn every press into a silent kernel poweroff. Fall back to
+	 * poweroff mode, which also keeps the force power off timeout armed.
+	 */
+	ret = pcat_pm_input_probe(pm_data);
+	if (ret) {
+		dev_err(dev,
+			"Failed to register power button input: %d, using poweroff mode.\n",
+			ret);
+		pm_data->button_mode = PCAT_PM_BUTTON_MODE_POWEROFF;
+	}
 
 	serdev_device_set_drvdata(serdev, pm_data);
 	serdev_device_set_client_ops(serdev, &pcat_pm_serdev_ops);
@@ -308,7 +365,8 @@ static int pcat_pm_probe(struct serdev_device *serdev)
  * pcat_pm_pm_suspend - System suspend handler
  * @dev: Device
  *
- * Disables watchdog during suspend.
+ * Disables the heartbeat watchdog during suspend while keeping the force
+ * power off timeout armed.
  *
  * Return: 0
  */
@@ -316,7 +374,14 @@ static int pcat_pm_pm_suspend(struct device *dev)
 {
 	struct pcat_pm_data *pm_data = dev_get_drvdata(dev);
 
-	pcat_pm_watchdog_timeout_set(pm_data, 0, 0);
+	/* A suspended host cannot service the button, so bypass the mode gate
+	 * in pcat_pm_watchdog_timeout_set() and arm the force power off
+	 * timeout in every mode: the PMU cutting power that many seconds
+	 * after announcing the shutdown is the only recovery from a suspend
+	 * that never wakes. Resume goes back through the mode gate.
+	 */
+	pcat_pm_watchdog_timeout_send(pm_data, pm_data->force_poweroff_timeout,
+		0, 0);
 
 	return 0;
 }
@@ -358,6 +423,11 @@ static const struct dev_pm_ops pcat_pm_pm_ops = {
 static void pcat_pm_remove(struct serdev_device *serdev)
 {
 	struct pcat_pm_data *pm_data = serdev_device_get_drvdata(serdev);
+
+	/* Disarm the heartbeat watchdog before heartbeats stop, or the PMU
+	 * cuts power to the still-running system about a minute after rmmod.
+	 */
+	pcat_pm_watchdog_timeout_set(pm_data, 0, msecs_to_jiffies(1000));
 
 	pm_data->work_flag = false;
 	pcat_pm_worker_stop(pm_data);
