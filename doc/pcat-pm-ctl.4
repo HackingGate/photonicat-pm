@@ -232,7 +232,11 @@ cannot trigger from this button.
 .PP
 The firmware debounces the button itself: on RA2E1260702000 a quick tap or
 a hold under about two seconds sends nothing, and a hold of about three
-seconds sends the request.
+seconds sends the request. Holding past that sends nothing further: a 12
+second hold reported one
+.B KEY_POWER
+and left the board running, so the firmware has no hard-cutoff hold to
+escalate to.
 .PP
 The PMU applies
 .B force-poweroff-timeout
@@ -245,7 +249,11 @@ to 120.
 So that a press the host declines does not become a power cut, the driver
 sends 0 for that timeout while the system is running in \(dqinput\(dq or
 \(dqignore\(dq mode, and restores the configured value in the shutdown
-handler. A press then leaves the PMU running normally, and a shutdown that
+handler and across suspend. A suspended host cannot service the button, so
+a press while suspended cuts power after the timeout in every mode \(em
+with button wake unverified, that is also the only way to recover a suspend
+that never wakes.
+A press then leaves the PMU running normally, and a shutdown that
 hangs is still cut short. A kernel hang is caught by the 60 s heartbeat
 watchdog in every mode. A hung userspace is not: in \(dqinput\(dq mode the
 button then only queues an event nobody reads, and the firmware has no
@@ -357,8 +365,9 @@ heartbeats stop, and 120 here measured a 125 s cut.
 Outside
 .B pmu-button-mode
 \(dqpoweroff\(dq the driver sends 0 while the system is running and the
-configured value at shutdown, so a declined button press is not a power
-cut. When set to 0, only the heartbeat watchdog guards against hangs.
+configured value at shutdown and during suspend, so a declined button press
+is not a power cut. When set to 0, only the heartbeat watchdog guards
+against hangs.
 Default: 0 (disabled).
 .TP
 .B pmu-button-mode

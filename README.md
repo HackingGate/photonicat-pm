@@ -206,7 +206,9 @@ sudo evtest /dev/input/by-path/platform-2afc0000.serial-event
 The firmware debounces the button itself: on RA2E1260702000 a quick tap or a
 hold under about two seconds sends nothing at all, and a hold of about three
 seconds sends the request. A stray press in a bag therefore never reaches the
-host in the first place.
+host in the first place. Holding past that sends nothing further: a 12 second
+hold reported one `KEY_POWER` and left the board running, so the firmware has
+no hard-cutoff hold to escalate to.
 
 > [!IMPORTANT]
 > The PMU applies [`force-poweroff-timeout`](#optional-properties) to a

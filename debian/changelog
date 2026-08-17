@@ -1,4 +1,4 @@
-photonicat-pm (1.0.6-1) unstable; urgency=medium
+photonicat-pm (1.1.0-1) unstable; urgency=medium
 
   * Make the response to a PMU power button press configurable. The new
     pmu-button-mode device tree property selects poweroff (the previous
@@ -23,13 +23,27 @@ photonicat-pm (1.0.6-1) unstable; urgency=medium
     not capped by the 60 second heartbeat watchdog, which fires only when
     heartbeats stop.
   * Record RA2E1260702000 button behavior: presses shorter than about
-    three seconds send nothing at all.
+    three seconds send nothing at all, a hold of about three seconds sends
+    the request, and a longer hold sends nothing further - a 12 second
+    hold sent one frame and did not cut power, so the firmware has no
+    hard-cutoff hold.
+  * Fall back to poweroff mode when the power button input device fails to
+    register. The driver used to stay in input mode with no input device,
+    so a later press fell through to a kernel poweroff with the force
+    power off timeout disarmed - the opposite of the configured policy.
+  * Keep the force power off timeout armed across suspend in every mode. A
+    suspended host cannot service the button, so a press while suspended
+    now cuts power after the timeout, which with button wake unverified is
+    also the only way to recover a suspend that never wakes.
+  * Disarm the heartbeat watchdog on module removal. It stayed armed after
+    rmmod and cut power to the still-running system about a minute later,
+    which the README's rmmod/insmod recipe walked straight into.
   * Return the license to GPL-2.0-or-later, matching the original driver
     and the MODULE_LICENSE declaration. The GPL-3.0-or-later relabel was
     incompatible with the GPL-2.0-only kernel and would have blocked any
     kernel-adjacent distribution.
 
- -- HackingGate <i@hackinggate.com>  Sun, 16 Aug 2026 19:30:00 +0900
+ -- HackingGate <i@hackinggate.com>  Mon, 17 Aug 2026 22:10:00 +0900
 
 photonicat-pm (1.0.5-1) unstable; urgency=medium
 
