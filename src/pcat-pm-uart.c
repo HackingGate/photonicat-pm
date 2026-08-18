@@ -53,6 +53,7 @@ static void pcat_pm_rtc_probe_update_locked(struct pcat_pm_data *pm_data,
 			PCAT_PM_RTC_CAP_ENABLED_PROBE;
 		dev_info(&pm_data->serdev->dev,
 			"PMU RTC enabled after runtime validation.\n");
+		pcat_pm_rtc_register_now(pm_data);
 	}
 }
 

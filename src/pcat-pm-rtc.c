@@ -12,6 +12,14 @@
 
 #define PCAT_PM_RTC_ACK_TIMEOUT_MS 1000
 
+/*
+ * How long pcat_pm_rtc_probe() waits for runtime validation before it
+ * registers the RTC anyway. Firmware that never passes validation then still
+ * gets a /dev/rtc0 that reports invalid data, as it did before registration
+ * was deferred, instead of no RTC device at all.
+ */
+#define PCAT_PM_RTC_REGISTER_FALLBACK_MS 10000
+
 static bool pcat_pm_rtc_enabled(struct pcat_pm_data *pm_data)
 {
 	return pcat_pm_rtc_capability_enabled(
@@ -329,9 +337,71 @@ static const struct rtc_class_ops pcat_pm_rtcops = {
 	.ioctl			= pcat_pm_rtc_ioctl,
 };
 
+/**
+ * pcat_pm_rtc_register_work - Deferred RTC registration
+ * @work: Work item embedded in the driver data
+ *
+ * Registers the RTC device once, whether woken by runtime validation or by
+ * the fallback delay. The RTC core reads the device from inside registration
+ * to seed the system clock, so this must not run before
+ * pcat_pm_rtc_read_time() can answer.
+ */
+static void pcat_pm_rtc_register_work(struct work_struct *work)
+{
+	struct pcat_pm_data *pm_data = container_of(to_delayed_work(work),
+		struct pcat_pm_data, rtc_register_work);
+	int ret;
+
+	if (pm_data->rtc_registered)
+		return;
+
+	if (!pcat_pm_rtc_enabled(pm_data))
+		dev_warn(&pm_data->serdev->dev,
+			"PMU RTC still %s after %u ms, registering anyway; the system clock keeps its boot value.\n",
+			pcat_pm_rtc_capability_name(
+				READ_ONCE(pm_data->pmu_fw_caps.rtc_capability)),
+			PCAT_PM_RTC_REGISTER_FALLBACK_MS);
+
+	ret = devm_rtc_register_device(pm_data->rtc);
+	if (ret) {
+		dev_err(&pm_data->serdev->dev, "Failed to register RTC device: %d\n", ret);
+		return;
+	}
+
+	/* Only now, as before registration was deferred: alarmtimer claims the
+	 * first RTC whose parent is already wakeup capable when it registers,
+	 * and holds a module reference for the lifetime of the system, which
+	 * makes the driver impossible to rmmod.
+	 */
+	device_init_wakeup(&pm_data->serdev->dev, true);
+
+	pm_data->rtc_registered = true;
+}
+
+void pcat_pm_rtc_register_now(struct pcat_pm_data *pm_data)
+{
+	lockdep_assert_held(&pm_data->mutex);
+
+	if (pm_data->rtc_register_stopped)
+		return;
+
+	mod_delayed_work(system_wq, &pm_data->rtc_register_work, 0);
+}
+
+void pcat_pm_rtc_remove(struct pcat_pm_data *pm_data)
+{
+	mutex_lock(&pm_data->mutex);
+	pm_data->rtc_register_stopped = true;
+	mutex_unlock(&pm_data->mutex);
+
+	cancel_delayed_work_sync(&pm_data->rtc_register_work);
+}
+
 int pcat_pm_rtc_probe(struct pcat_pm_data *pm_data)
 {
 	int ret;
+
+	INIT_DELAYED_WORK(&pm_data->rtc_register_work, pcat_pm_rtc_register_work);
 
 	pm_data->rtc = devm_rtc_allocate_device(&pm_data->serdev->dev);
 	if (IS_ERR(pm_data->rtc)) {
@@ -345,13 +415,8 @@ int pcat_pm_rtc_probe(struct pcat_pm_data *pm_data)
 	pm_data->rtc->ops = &pcat_pm_rtcops;
 	set_bit(RTC_FEATURE_ALARM, pm_data->rtc->features);
 
-	ret = devm_rtc_register_device(pm_data->rtc);
-	if (ret) {
-		dev_err(&pm_data->serdev->dev, "Failed to register RTC device: %d\n", ret);
-		return ret;
-	}
-
-	device_init_wakeup(&pm_data->serdev->dev, true);
+	schedule_delayed_work(&pm_data->rtc_register_work,
+		msecs_to_jiffies(PCAT_PM_RTC_REGISTER_FALLBACK_MS));
 
 	return 0;
 }

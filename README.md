@@ -47,10 +47,12 @@ PMU has answered a threshold query at least once, which promotes
 |-----------|-------------|
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
 
-`/dev/rtc0` is registered before the PMU clock is trusted, so reads report
-invalid data and alarm programming fails until `pmu_rtc_capability` reaches
-`enabled-probe`. Firmware whose RTC never passes that probe is listed in the
-wiki.
+`/dev/rtc0` appears once the PMU clock passes runtime validation
+(`pmu_rtc_capability` reaches `enabled-probe`), which takes as long as the PMU
+needs to send three valid, advancing RTC samples. Registering it earlier made the kernel's boot-time read of the RTC fail and the
+system clock keep whatever seeded it. If validation never passes, `/dev/rtc0` is
+registered anyway 10 seconds after probe, with reads reporting invalid data and
+alarm programming failing; that firmware is listed in the wiki.
 
 ### Sensors & Fan
 
@@ -477,11 +479,13 @@ The driver registers an RTC device with alarm support. Setting an alarm sends
 the time to the PMU (`SCHEDULE_STARTUP_TIME_SET`), which stores it and powers on
 the board at that time even from a full power-off. The alarm is one-shot.
 
-All firmware starts in `pending-probe`: `/dev/rtc0` stays registered, but reads
-report invalid data and alarm programming fails until the driver observes three
-consecutive valid, advancing PMU RTC samples. Raw scheduled-boot commands
-through `/dev/pcat-pm-ctl` are gated the same way, and no firmware version
-string enables either by itself.
+All firmware starts in `pending-probe`. The driver registers `/dev/rtc0` once it
+observes three consecutive valid, advancing PMU RTC samples, so the kernel's
+boot-time read of the RTC seeds the system clock from the PMU. Firmware that
+never passes the probe gets `/dev/rtc0` registered 10 seconds after probe
+instead, where reads report invalid data and alarm programming fails. Raw
+scheduled-boot commands through `/dev/pcat-pm-ctl` are gated the same way, and
+no firmware version string enables either by itself.
 
 Works with standard Linux RTC tools such as `rtcwake(8)`:
 
