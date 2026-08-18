@@ -349,6 +349,8 @@ struct pcat_pm_fw_caps {
  * @rtc_register_work: Deferred registration of @rtc, run once the PMU RTC
  *	passes runtime validation or the fallback delay expires
  * @rtc_registered: @rtc has been registered with the RTC core
+ * @rtc_register_stopped: Registration is being torn down; no further work
+ *	may be queued
  * @fan_ctrl_speed: Fan control setting (0-100%)
  * @fan_managed: True once the driver has explicitly set fan speed
  * @movement_timestamp: Last movement detection time (ns)
@@ -462,6 +464,7 @@ struct pcat_pm_data {
 	time64_t rtc_probe_last_time;
 	struct delayed_work rtc_register_work;
 	bool rtc_registered;
+	bool rtc_register_stopped;
 	u16 rtc_sync_ack_frame;
 	u16 schedule_boot_ack_frame;
 	u8 rtc_sync_ack_status;
@@ -714,14 +717,19 @@ int pcat_pm_rtc_probe(struct pcat_pm_data *pm_data);
  * runtime validation. Registration is therefore deferred until this is
  * called, or until the fallback delay set up by pcat_pm_rtc_probe() expires.
  *
- * Safe to call with pcat_pm_data.mutex held and from the UART receive path;
- * the registration itself runs from a workqueue.
+ * Must be called with pcat_pm_data.mutex held, which is also what keeps the
+ * UART receive path from queueing work behind pcat_pm_rtc_remove(). The
+ * registration itself runs from a workqueue.
  */
 void pcat_pm_rtc_register_now(struct pcat_pm_data *pm_data);
 
 /**
  * pcat_pm_rtc_remove - Stop pending RTC registration
  * @pm_data: Driver data
+ *
+ * Blocks further queueing before waiting for any queued registration to
+ * finish, so a status report arriving during teardown cannot register the
+ * device behind the driver's back.
  */
 void pcat_pm_rtc_remove(struct pcat_pm_data *pm_data);
 

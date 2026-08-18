@@ -48,8 +48,8 @@ PMU has answered a threshold query at least once, which promotes
 | `/dev/rtc0` | Real-time clock backed by PMU. Supports RTC alarms for scheduled power-on via `rtcwake(8)`. |
 
 `/dev/rtc0` appears once the PMU clock passes runtime validation
-(`pmu_rtc_capability` reaches `enabled-probe`), a second or two into the boot.
-Registering it earlier made the kernel's boot-time read of the RTC fail and the
+(`pmu_rtc_capability` reaches `enabled-probe`), which takes as long as the PMU
+needs to send three valid, advancing RTC samples. Registering it earlier made the kernel's boot-time read of the RTC fail and the
 system clock keep whatever seeded it. If validation never passes, `/dev/rtc0` is
 registered anyway 10 seconds after probe, with reads reporting invalid data and
 alarm programming failing; that firmware is listed in the wiki.

@@ -368,16 +368,32 @@ static void pcat_pm_rtc_register_work(struct work_struct *work)
 		return;
 	}
 
+	/* Only now, as before registration was deferred: alarmtimer claims the
+	 * first RTC whose parent is already wakeup capable when it registers,
+	 * and holds a module reference for the lifetime of the system, which
+	 * makes the driver impossible to rmmod.
+	 */
+	device_init_wakeup(&pm_data->serdev->dev, true);
+
 	pm_data->rtc_registered = true;
 }
 
 void pcat_pm_rtc_register_now(struct pcat_pm_data *pm_data)
 {
+	lockdep_assert_held(&pm_data->mutex);
+
+	if (pm_data->rtc_register_stopped)
+		return;
+
 	mod_delayed_work(system_wq, &pm_data->rtc_register_work, 0);
 }
 
 void pcat_pm_rtc_remove(struct pcat_pm_data *pm_data)
 {
+	mutex_lock(&pm_data->mutex);
+	pm_data->rtc_register_stopped = true;
+	mutex_unlock(&pm_data->mutex);
+
 	cancel_delayed_work_sync(&pm_data->rtc_register_work);
 }
 
@@ -398,8 +414,6 @@ int pcat_pm_rtc_probe(struct pcat_pm_data *pm_data)
 	pm_data->rtc->range_max = RTC_TIMESTAMP_END_2099;
 	pm_data->rtc->ops = &pcat_pm_rtcops;
 	set_bit(RTC_FEATURE_ALARM, pm_data->rtc->features);
-
-	device_init_wakeup(&pm_data->serdev->dev, true);
 
 	schedule_delayed_work(&pm_data->rtc_register_work,
 		msecs_to_jiffies(PCAT_PM_RTC_REGISTER_FALLBACK_MS));
