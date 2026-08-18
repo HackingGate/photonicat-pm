@@ -44,6 +44,7 @@
 #include <linux/time64.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
+#include <linux/workqueue.h>
 
 /**
  * PCAT_PM_BUFFER_SIZE - Size of UART receive/transmit buffers
@@ -345,6 +346,9 @@ struct pcat_pm_fw_caps {
  * @rtc_wday: RTC day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
  * @rtc_probe_valid_samples: Consecutive valid PMU RTC samples for dynamic enable
  * @rtc_probe_last_time: Last valid PMU RTC sample timestamp for monotonic probe
+ * @rtc_register_work: Deferred registration of @rtc, run once the PMU RTC
+ *	passes runtime validation or the fallback delay expires
+ * @rtc_registered: @rtc has been registered with the RTC core
  * @fan_ctrl_speed: Fan control setting (0-100%)
  * @fan_managed: True once the driver has explicitly set fan speed
  * @movement_timestamp: Last movement detection time (ns)
@@ -456,6 +460,8 @@ struct pcat_pm_data {
 	u8 rtc_wday;
 	u8 rtc_probe_valid_samples;
 	time64_t rtc_probe_last_time;
+	struct delayed_work rtc_register_work;
+	bool rtc_registered;
 	u16 rtc_sync_ack_frame;
 	u16 schedule_boot_ack_frame;
 	u8 rtc_sync_ack_status;
@@ -692,9 +698,32 @@ void pcat_pm_charge_threshold_report(struct pcat_pm_data *pm_data,
  * pcat_pm_rtc_probe - Initialize RTC device
  * @pm_data: Driver data
  *
+ * Allocates the RTC device and schedules its registration; see
+ * pcat_pm_rtc_register_now() for why registration is deferred.
+ *
  * Return: 0 on success, negative error otherwise
  */
 int pcat_pm_rtc_probe(struct pcat_pm_data *pm_data);
+
+/**
+ * pcat_pm_rtc_register_now - Register the RTC device without further delay
+ * @pm_data: Driver data
+ *
+ * Registering the RTC makes the RTC core read it once to seed the system
+ * clock (hctosys), and that read only succeeds after the PMU RTC has passed
+ * runtime validation. Registration is therefore deferred until this is
+ * called, or until the fallback delay set up by pcat_pm_rtc_probe() expires.
+ *
+ * Safe to call with pcat_pm_data.mutex held and from the UART receive path;
+ * the registration itself runs from a workqueue.
+ */
+void pcat_pm_rtc_register_now(struct pcat_pm_data *pm_data);
+
+/**
+ * pcat_pm_rtc_remove - Stop pending RTC registration
+ * @pm_data: Driver data
+ */
+void pcat_pm_rtc_remove(struct pcat_pm_data *pm_data);
 
 /* ========================================================================
  * Hardware Monitor Module (pcat-pm-hwmon.c)

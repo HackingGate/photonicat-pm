@@ -22,6 +22,14 @@ photonicat-pm (1.1.0-1) unstable; urgency=medium
   * Correct the force-poweroff-timeout documentation: values above 60 are
     not capped by the 60 second heartbeat watchdog, which fires only when
     heartbeats stop.
+  * Register the RTC only after the PMU clock passes runtime validation.
+    The device was registered during probe, when reads still fail, so the
+    kernel's boot-time read of the RTC failed on every boot and nothing
+    retried: the system clock silently kept its fake-hwclock seed, which
+    on an unclean power cut left the board 23 minutes behind real time.
+    Registration now waits for the same validation that gates the other
+    PMU-backed features, or for a 10 second fallback so firmware whose RTC
+    never validates still gets a /dev/rtc0.
   * Record RA2E1260702000 button behavior: presses shorter than about
     three seconds send nothing at all, a hold of about three seconds sends
     the request, and a longer hold sends nothing further - a 12 second
