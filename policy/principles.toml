@@ -1,0 +1,55 @@
+# Content policy and guards for this repository.
+#
+# One `[rule.<id>]` section per rule declared here; everything else arrives from
+# the bundled sets named below, which are re-read from the uphold binary on every
+# run, so nothing is copied down.
+#
+# `policy/upheld.toml` names rules from this file and hook ids from
+# `.pre-commit-config.yaml` by id alone, because `uphold check` resolves both
+# against one namespace.
+
+# Declared rather than read off `origin`, which is the one remote most likely to
+# be wrong when `unowned-push` is asked about it.
+owner = "HackingGate"
+
+visibility = "public"
+
+[inherit]
+# commit-message-residue, unreviewed-history, unowned-push: the commit message,
+#   the merge and the push destination are what no tree scan can see. Changes
+#   land as squashed PRs; the merge commits in older history predate that.
+# process-residue, code-residue: the driver, the man page and the README
+#   describe current behavior; per-firmware results live in the wiki.
+# credentials: the secret scan is gitleaks through the uphold-supply-chain*
+#   hooks, which replaced pre-commit-hooks' detect-private-key.
+# invisible-characters, private-names, host-identity: published text, read on
+#   a public forge.
+# stale-pins, unmanaged-pins, hand-rolled-toolchain: the hook revisions are
+#   pins, and the Dockerfile and workflow are where a hand-typed download
+#   version would land.
+# default-token-grant: the release workflow writes to the repository, so its
+#   token grant is declared rather than inherited from the org default.
+# stale-visibility: a public repository whose policy still says private.
+# mismatched-author: one person commits here, under one address.
+sets = [
+  "commit-message-residue",
+  "unreviewed-history",
+  "unowned-push",
+  "process-residue",
+  "code-residue",
+  "credentials",
+  "invisible-characters",
+  "private-names",
+  "host-identity",
+  "stale-pins",
+  "unmanaged-pins",
+  "hand-rolled-toolchain",
+  "default-token-grant",
+  "stale-visibility",
+  "mismatched-author",
+]
+
+# dpkg-buildpackage reads the package version from debian/changelog, so the file
+# is part of the build rather than a hand-kept history.
+[override.no-source-changelog]
+files.exclude = ["debian/changelog"]

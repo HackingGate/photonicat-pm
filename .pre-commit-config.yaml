@@ -1,4 +1,23 @@
+# Run these with `prek run --all-files`; the slow ones live at `pre-push` and
+# `manual`, reached with `prek run --hook-stage manual --all-files`.
+#
+# Which uphold guards actually fire is decided in policy/principles.toml, not
+# here: the ids below are the stages, and a stage with no guard declared for it
+# costs nothing, so this block does not change when the policy does.
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+  - pre-merge-commit
+  - pre-push
+
+# File checks never belong at commit-msg, where the only "file" is the message;
+# the uphold ids that read the message declare that stage themselves.
+default_stages: [pre-commit, pre-merge-commit, pre-push, manual]
+
 repos:
+  # Merge-conflict markers are uphold's no-merge-conflict-markers and private
+  # keys are gitleaks through uphold-supply-chain-staged, so neither
+  # pre-commit-hooks check is pinned here.
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -6,8 +25,7 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
-      - id: check-merge-conflict
-      - id: detect-private-key
+
   - repo: local
     hooks:
       - id: lint-manpages
@@ -17,11 +35,35 @@ repos:
         files: '^doc/.*\.[0-9]$'
       - id: check-md-anchors
         name: markdown in-document anchors resolve
-        entry: scripts/check-md-anchors.py
-        language: script
+        entry: uv run --script scripts/check-md-anchors.py
+        language: system
         files: '\.md$'
+      # Builds the package in Docker, installs it under DKMS and runs lintian:
+      # the same compose run the workflow does, and minutes rather than
+      # seconds, so it waits for the push.
       - id: lintian-docker
         name: lintian (docker)
         entry: docker compose up --build --exit-code-from lint
         language: system
         pass_filenames: false
+        stages: [pre-push, manual]
+
+  - repo: https://github.com/HackingGate/uphold
+    rev: v1.21.0
+    hooks:
+      - id: uphold-check
+      - id: uphold-scan
+      # A commit message is published the moment it is written, and no tree scan
+      # can see it.
+      - id: uphold-scan-text
+      - id: uphold-guard
+      - id: uphold-guard-commit-msg
+      - id: uphold-guard-merge
+      - id: uphold-guard-push
+      - id: uphold-guard-manual
+      # Workflow security and committed secrets: gitleaks over the staged diff
+      # at commit, the scanners over the pushed range at push, and over the
+      # whole tree and history by hand.
+      - id: uphold-supply-chain-staged
+      - id: uphold-supply-chain
+      - id: uphold-supply-chain-all

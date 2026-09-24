@@ -1,0 +1,86 @@
+# What enforces which principle in this repository.
+# https://github.com/HackingGate/uphold
+#
+# One entry per rule that already fires. `rule` is the rule's own id, resolved
+# against the content policy in policy/principles.toml and the hooks pinned in
+# .pre-commit-config.yaml, so an entry goes stale loudly when its rule is
+# removed.
+
+# lintian fails on warnings as well as errors, and the same compose run installs
+# the package under DKMS, so a packaging or build defect stops the push rather
+# than reaching a board.
+[[enforce]]
+principle = "fail-fast"
+rule = "lintian-docker"
+
+# groff exits 0 on its own warnings; the hook treats any diagnostic as a
+# failure so a broken man page is not published looking fine.
+[[enforce]]
+principle = "fail-fast"
+rule = "lint-manpages"
+
+# An in-page link to a heading that was renamed reads as though someone checked.
+[[enforce]]
+principle = "fail-fast"
+rule = "check-md-anchors"
+
+# gitleaks over the staged diff and the pushed range, in a public repository.
+[[enforce]]
+principle = "least-privilege"
+rule = "uphold-supply-chain-staged"
+
+[[enforce]]
+principle = "least-privilege"
+rule = "uphold-supply-chain"
+
+# The release workflow writes to the repository, so its grant is declared in the
+# file rather than taken from the org default.
+[[enforce]]
+principle = "least-privilege"
+rule = "workflow-declares-permissions"
+
+[[enforce]]
+principle = "least-privilege"
+rule = "prevent-public-push"
+
+[[enforce]]
+principle = "complete-mediation"
+rule = "prevent-ai-author"
+
+[[enforce]]
+principle = "complete-mediation"
+rule = "prevent-author-mismatch"
+
+[[enforce]]
+principle = "complete-mediation"
+rule = "no-local-merge"
+
+[[enforce]]
+principle = "complete-mediation"
+rule = "no-merge-commit"
+
+[[enforce]]
+principle = "least-astonishment"
+rule = "prevent-unusual-unicode"
+
+[[enforce]]
+principle = "least-astonishment"
+rule = "prevent-unusual-unicode-in-files"
+
+# Per-firmware results live in the wiki; the README and man page describe what
+# the driver does now.
+[[enforce]]
+principle = "high-cohesion-low-coupling"
+rule = "no-task-tracker-references"
+
+[[enforce]]
+principle = "high-cohesion-low-coupling"
+rule = "no-task-tracker-references-in-code"
+
+[[enforce]]
+principle = "single-authoritative-source"
+rule = "no-status-source-metadata"
+
+[[enforce]]
+principle = "single-authoritative-source"
+rule = "no-source-changelog"
