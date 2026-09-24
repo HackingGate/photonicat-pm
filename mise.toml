@@ -1,0 +1,10 @@
+# The hooks run through prek, and scripts/check-md-anchors.py through
+# `uv run --script`. The kernel module and the package build in Docker.
+[tools]
+prek = "latest"
+uv = "latest"
+# The secret scan behind the uphold-supply-chain* hooks. uphold refuses any
+# other gitleaks version, so this is a pin, not a floor.
+gitleaks = "8.30.1"
+# Workflow security for .github/workflows, read by the same hooks.
+"aqua:zizmorcore/zizmor" = "latest"
